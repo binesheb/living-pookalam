@@ -1,4 +1,4 @@
-from app.ui.field_launcher import launch
+from app.ui.calibration_field import launch
 
 
 if __name__ == "__main__":
