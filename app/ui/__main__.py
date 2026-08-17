@@ -1,4 +1,4 @@
-from app.ui.hardware_test import launch
+from app.ui.full_app import launch
 
 
 if __name__ == "__main__":
