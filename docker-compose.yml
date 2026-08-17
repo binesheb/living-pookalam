@@ -1,0 +1,10 @@
+services:
+  living-pookalam:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      LIVING_POOKALAM_PROFILE: ${LIVING_POOKALAM_PROFILE:-template}
+    volumes:
+      - ./profiles:/app/profiles:ro
