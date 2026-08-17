@@ -1,4 +1,4 @@
-from app.ui.windows_operator import launch
+from app.ui.desktop import launch
 
 
 if __name__ == "__main__":
