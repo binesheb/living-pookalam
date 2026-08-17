@@ -1,4 +1,4 @@
-from app.ui.calibration_realtime import launch
+from app.ui.field_launcher import launch
 
 
 if __name__ == "__main__":
