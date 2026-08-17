@@ -1,11 +1,15 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+
 if not exist .venv\Scripts\python.exe (
-  echo Creating Windows virtual environment...
+  echo First-run setup: creating Windows virtual environment...
   py -3 -m venv .venv
+  call .venv\Scripts\activate.bat
+  python -m pip install --upgrade pip
+  pip install -r requirements.txt
+) else (
+  call .venv\Scripts\activate.bat
 )
-call .venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+
 python -m app.ui
