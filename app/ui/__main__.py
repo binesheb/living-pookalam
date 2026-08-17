@@ -1,4 +1,4 @@
-from app.ui.bootstrap import launch
+from app.ui.calibration_realtime import launch
 
 
 if __name__ == "__main__":
