@@ -1,31 +1,34 @@
-# Living Pookalam
+# LIVE POOKALAM
 
-A reusable, showroom-deployable interactive Pookalam platform for **Windows 11**.
+**Interactive Projection Experience for Onam**
 
-Living Pookalam turns a physical floral/visual installation into an interactive projection experience using a webcam, projector, local computer and configurable content. The same software core is deployed to multiple showrooms through independent profiles.
+**developed by bnsh.eb**
 
-## Current Windows hardware-test build
+Living Pookalam is a reusable Windows 11 platform that turns a physical Pookalam, a digital Pookalam, or both into an interactive projection experience. It is designed to be installed repeatedly across showrooms without changing the application core.
 
-The repository now contains a functional desktop operator application.
+## Design philosophy
+
+The operator should not need to understand computer vision, homography, rendering or Python.
+
+The application therefore follows a guided workflow:
 
 ```text
-Windows 11 PC
-    |
-    +-- USB webcam
-    |
-    +-- HDMI / DisplayPort projector
-    |
-    +-- Living Pookalam Operator
-             |
-             +-- 4-point projector calibration
-             +-- digital Pookalam image
-             +-- physical Pookalam detection
-             +-- hybrid mode
-             +-- interaction test
-             +-- live projector output
+HOME
+  ↓
+SOURCE
+  ↓
+CALIBRATE (when installation is ready)
+  ↓
+DETECT / LOCK POOKALAM
+  ↓
+EXPERIENCE
+  ↓
+RUN SHOW
 ```
 
-### Start the Windows application
+Calibration is deliberately optional during development. The visual experience can be tested on a projector before the physical installation is ready.
+
+## Windows 11 test
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -33,96 +36,126 @@ pip install -r requirements.txt
 python -m app.ui
 ```
 
-Or double-click `run_windows.bat`.
+Or use `run_windows.bat`.
+
+## Modes
+
+### Digital
+Upload a Pookalam image and use it as the base visual surface. This is the fastest way to develop and test effects without a physical flower arrangement.
+
+### Physical
+The webcam observes the real floor Pookalam. The vision layer detects its usable contour and derives geometry for interaction and effects.
+
+### Hybrid
+The real flower Pookalam remains visible while projected light, particles, glows, waves and other effects are layered over it.
 
 ## Calibration model
 
-The first hardware build uses a **direct camera-to-projector homography** for the planar floor.
+The first hardware implementation uses a planar camera → projector homography.
 
-1. Extend Windows display to the projector.
-2. Open Living Pookalam.
-3. Press **PROJECTOR TEST** to verify output.
-4. Press **4-POINT CALIBRATE**.
-5. The projector displays four numbered targets.
-6. The webcam detects the four targets.
-7. The software calculates the camera -> projector homography.
-8. The mapping is saved to `installation_profile.json`.
+1. Extend Windows to the projector.
+2. Start Live Pookalam.
+3. Open **CALIBRATE**.
+4. The projector displays four targets.
+5. The webcam detects their camera coordinates.
+6. The application computes the homography.
+7. The installation mapping is saved locally.
 
-This works even when the webcam is mounted at an angle because both camera and projector are observing the same approximately planar floor.
+Because both devices observe the same floor plane, the camera can be mounted at an angle. Future production calibration will add stronger marker detection, lens correction, confidence/error reporting and manual adjustment.
 
-## Physical Pookalam
+## Pookalam perception
 
-The detector does not assume the camera sees a perfect circle. The camera image is segmented by colour/chroma and the largest plausible compact region is used as the initial Pookalam contour. The contour is the primary geometry; centre/radius are derived values.
+The Pookalam is represented as a contour/mask rather than assuming a perfect circle. This is important when the webcam is placed to the side and the Pookalam appears as an ellipse or perspective-distorted shape.
 
-The detection is intentionally **assisted** for this first physical test. The production vision layer will add stronger floor rectification, confidence scoring, manual contour correction and AI person/object tracking.
+Planned perception layers include:
 
-## Interaction
+- floor rectification
+- colour/chroma segmentation
+- boundary and contour locking
+- centre/radial geometry
+- ring/region analysis
+- symmetry analysis
+- feature/motif detection
+- person tracking
+- multiple-person interaction
+- optional AI semantic recognition
 
-After calibration, **INTERACTION TEST** enables webcam motion detection. A detected person/body region is mapped through the camera-to-projector homography and used to drive a visible ring/particle effect.
+## Experience engine
 
-This is the first end-to-end hardware proof: **camera -> mapping -> interaction -> projector**.
+The renderer is built from independent effect layers so an operator can compose an experience without changing code.
 
-## Digital / physical / hybrid
+Current layers include:
 
-- **Digital:** upload a Pookalam image and use it as the projected base.
-- **Physical:** use the actual flower Pookalam as the physical surface.
-- **Hybrid:** combine a real Pookalam with uploaded digital artwork/effects.
+- base Pookalam
+- breathing glow
+- radial waves
+- petal flow
+- fireflies
+- lotus bloom
+- interaction ripple
+- interaction sparks
+- spiral light
+- colour pulse
 
-## Core principle
+The architecture is intentionally open for future Onam scenes, Mahabali sequences, butterflies, lamps, flower motion, water/light waves, audio-reactive effects, timelines and scripted scenes.
 
-**One application. Many showroom profiles.**
+## Operator workflow
 
-A showroom must never require a code fork. Physical dimensions, camera calibration, projector mapping, zones, content and local hardware settings belong in `profiles/`, while application logic stays in `app/`.
+### HOME
+Hardware health, showroom profile, calibration state and quick-start actions.
 
-## Repository layout
+### SOURCE
+Choose Digital, Physical or Hybrid.
+
+### CALIBRATE
+Projector/camera mapping. Can be skipped during early development.
+
+### DETECT
+Find and lock the actual Pookalam. Detection is assisted; the contour is the primary geometry.
+
+### EXPERIENCE
+Enable/disable individual effect layers.
+
+### RUN SHOW
+Safe show control. `ESC` stops the experience.
+
+## Showroom replication
+
+One core application is deployed everywhere.
 
 ```text
-app/
-  api/             Local control and health API
-  core/            Configuration and application lifecycle
-  experience/      Scenes, zones and experience state
-  hardware/        Hardware adapters
-  interaction/     Input-to-action rules
-  perception/      Camera/sensor processing
-  rendering/       Output abstraction
-  ui/              Windows operator application
-profiles/
-  template/        Copy this for a new showroom
-  showrooms/       Deployment-specific profiles
-tests/             Automated tests
-tools/             Calibration and diagnostics
-docs/              Architecture and deployment docs
-run_windows.bat    Windows one-click launcher
+app/                       shared application logic
+profiles/template/         reference installation
+profiles/showrooms/<id>/  showroom-specific hardware/calibration/content
 ```
 
-## Replicating a showroom
+A new showroom should never require a code fork. Camera index, projector display, physical dimensions, calibration, zones and local content belong in the showroom profile.
 
-1. Copy `profiles/template` to `profiles/showrooms/<id>`.
-2. Enter physical dimensions and hardware identifiers.
-3. Run projector/camera calibration at that showroom.
-4. Store calibration output in the showroom profile.
-5. Deploy the same application release.
-6. Validate health, camera input, rendering and interaction.
+## Production roadmap
 
-## Development status
-
-The project is being built in layers. The current build is suitable for **initial Windows 11 hardware testing**, not yet the final Onam production release.
-
-Next production layers include:
-
-- robust floor-plane calibration
-- projector lens/distortion compensation
-- Pookalam contour/mask locking
-- manual contour correction
-- GPU visual renderer
-- richer particle/flower effects
-- person tracking and multiple-person interaction
-- scene/timeline engine
-- audio synchronization
-- packaged Windows executable
+- robust ArUco calibration
+- camera lens correction
+- floor-plane rectification
+- editable Pookalam mask
+- Pookalam feature/region map
+- GPU renderer
+- multi-person tracking
+- hand/gesture tracking
+- scene/timeline editor
+- audio-reactive experience
+- Onam/Mahabali scene library
+- packaged Windows EXE
+- automatic startup/recovery
+- watchdog and failsafe
 - showroom profile editor
 - installation diagnostics
-- recovery/failsafe handling
+- remote deployment/update support
+
+## Project identity
+
+**LIVE POOKALAM**  
+Interactive Projection Experience  
+**developed by bnsh.eb**
 
 ## License
 
