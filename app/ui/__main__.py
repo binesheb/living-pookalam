@@ -1,4 +1,4 @@
-from app.ui.full_app import launch
+from app.ui.live_pookalam_app import launch
 
 
 if __name__ == "__main__":
