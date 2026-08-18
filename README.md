@@ -46,6 +46,14 @@ The webcam observes the real flower Pookalam. The deterministic vision layer der
 ### Hybrid
 The physical flowers remain visible while the projector adds effects over the real geometry.
 
+## Projection masking
+
+The projector output is deliberately **Pookalam-only**. Effects are rendered on a black projector surface and passed through a projection-space mask derived from the detected Pookalam footprint. Large effect primitives are rejected when they would cross the boundary, line effects are segmented at the boundary, and a narrow configurable edge band is allowed for edge FX.
+
+This prevents the normal rectangular projector frame from becoming visible on the surrounding floor. The projector remains a rectangle technically, but outside the approved Pookalam/effect area the rendered output is black.
+
+The mask is generated after camera → projector mapping, so it works with an oblique side-mounted camera/projector arrangement as long as the floor plane is calibrated correctly.
+
 ## Calibration
 
 Calibration is an automated, repeatable camera → projector mapping sequence. Only the currently projected, uniquely coloured target is valid, reducing false locks from wallpaper or room content. A new mapping is accepted only after stable observations and validation; the previous mapping remains available until a valid replacement exists.
@@ -135,6 +143,7 @@ Developer Mode is intended for installation and experimentation. It can show:
 - centre/geometry
 - calibration diagnostics
 - projected real edge
+- projection mask
 - effect previews
 
 The interaction behavior is intentionally not hard-coded to a single gesture. This allows the final Onam interaction design to be decided after real-world tracking tests.
