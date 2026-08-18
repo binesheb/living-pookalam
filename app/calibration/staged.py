@@ -187,6 +187,86 @@ def _detect_black_dot(frame: np.ndarray, expected_xy, radius: int):
     return None if best is None else (float(best[1]), float(best[2]))
 
 
+def _draw_crosshair(frame, point, colour, label, radius=24):
+    """Draw a highly visible calibration marker in camera coordinates."""
+    x, y = int(round(point[0])), int(round(point[1]))
+    cv2.circle(frame, (x, y), radius, colour, 3, cv2.LINE_AA)
+    cv2.line(frame, (x-radius-12, y), (x+radius+12, y), colour, 2, cv2.LINE_AA)
+    cv2.line(frame, (x, y-radius-12), (x, y+radius+12), colour, 2, cv2.LINE_AA)
+    cv2.circle(frame, (x, y), 5, colour, -1, cv2.LINE_AA)
+    cv2.putText(frame, label, (x+radius+10, y-8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, colour, 2, cv2.LINE_AA)
+
+
+def _camera_calibration_overlay(self, frame):
+    """Overlay expected, detected and locked calibration points on camera feed."""
+    if frame is None:
+        return frame
+
+    out = frame.copy()
+    quad = getattr(self, "projection_quad", None)
+    if quad is not None:
+        q = np.int32(np.round(quad))
+        cv2.polylines(out, [q], True, (0, 255, 255), 3, cv2.LINE_AA)
+        for i, p in enumerate(q):
+            cv2.circle(out, tuple(p), 7, (0, 255, 255), -1, cv2.LINE_AA)
+            cv2.putText(out, f"SURFACE {i+1}", (int(p[0])+10, int(p[1])-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2, cv2.LINE_AA)
+
+    # The yellow cross is where the current homography predicts the projector
+    # target should appear in the camera. Green is where the detector actually
+    # found the black target. The difference is immediately visible.
+    if self.H is not None and self.proj is not None:
+        margin = 0.12
+        projector_points = np.float32([
+            [self.proj.w*margin, self.proj.h*margin],
+            [self.proj.w*(1-margin), self.proj.h*margin],
+            [self.proj.w*(1-margin), self.proj.h*(1-margin)],
+            [self.proj.w*margin, self.proj.h*(1-margin)],
+        ])
+        try:
+            expected_camera = cv2.perspectiveTransform(
+                projector_points.reshape(-1, 1, 2), np.linalg.inv(self.H)
+            ).reshape(-1, 2)
+        except np.linalg.LinAlgError:
+            expected_camera = None
+
+        if expected_camera is not None:
+            for i, p in enumerate(expected_camera):
+                _draw_crosshair(out, p, (0, 215, 255), f"P{i+1} EXPECTED", radius=18)
+
+    locked = list(getattr(self, "calib_points", []) or [])
+    for i, p in enumerate(locked):
+        _draw_crosshair(out, p, (0, 255, 0), f"P{i+1} LOCKED  {p[0]:.0f},{p[1]:.0f}", radius=28)
+
+    # While a target is active, show the live detector result even before the
+    # eight-frame lock completes. This makes it obvious what the algorithm sees.
+    idx = getattr(self, "calib_index", -1)
+    if idx >= 0 and idx < 4:
+        detected = self.detect_target(frame, idx)
+        if detected is not None:
+            _draw_crosshair(out, detected, (255, 80, 255),
+                            f"P{idx+1} DETECTED  {detected[0]:.0f},{detected[1]:.0f}", radius=34)
+            if self.H is not None and expected_camera is not None:
+                error = float(np.linalg.norm(np.asarray(detected) - expected_camera[idx]))
+                cv2.putText(out, f"TARGET ERROR: {error:.1f}px",
+                            (30, out.shape[0]-28), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.75, (255, 80, 255), 2, cv2.LINE_AA)
+
+    status = "GEOMETRY OVERLAY"
+    if len(locked) == 4 and idx == -1:
+        status = "GEOMETRY LOCKED • 4/4 POINTS"
+    elif idx >= 0:
+        status = f"LIVE DETECTION • TARGET {idx+1}/4"
+    elif getattr(self, "calib_index", -1) == -2:
+        status = "WHITE FIELD • PROJECTOR SPACE"
+
+    cv2.rectangle(out, (18, 14), (430, 55), (0, 0, 0), -1)
+    cv2.putText(out, status, (30, 43), cv2.FONT_HERSHEY_SIMPLEX,
+                0.72, (255, 255, 255), 2, cv2.LINE_AA)
+    return out
+
+
 def _install():
     from app.ui.field_ui import FieldConsole, ProjectionWindow
 
@@ -336,9 +416,30 @@ def _install():
         self.calib_index = -1
         self.proj.black()
 
+    # Keep the existing production camera loop intact, then add a visualization
+    # pass. This is deliberately wrapped here so ProductFieldConsole and other
+    # subclasses inherit the overlay without replacing their own tick methods.
+    original_tick = FieldConsole.tick
+
+    def tick_with_calibration_overlay(self):
+        original_tick(self)
+        if self.frame is None or not hasattr(self, "calib_preview"):
+            return
+        try:
+            overlay = _camera_calibration_overlay(self, self.frame)
+            image = cv2.resize(overlay, (900, 506), interpolation=cv2.INTER_AREA)
+            rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            from PIL import Image, ImageTk
+            self.calib_overlay_photo = ImageTk.PhotoImage(Image.fromarray(rgb))
+            self.calib_preview.configure(image=self.calib_overlay_photo)
+        except Exception:
+            # Visualization must never break the calibration loop.
+            pass
+
     FieldConsole.start_calibration = start_calibration
     FieldConsole.detect_target = detect_target
     FieldConsole.calibration_tick = calibration_tick
+    FieldConsole.tick = tick_with_calibration_overlay
 
 
 _install()
