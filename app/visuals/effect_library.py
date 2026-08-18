@@ -16,6 +16,9 @@ def _spec(id, name, category, description, parameters=("intensity", "speed", "si
 
 CATEGORIES = ("EDGE FX", "RADIAL", "FLOWER", "PARTICLES", "LIGHT", "LIQUID", "ENERGY", "ONAM", "INTERACTION", "TRANSITIONS")
 EFFECTS = (
+    # System/base layer is intentionally not exposed as a decorative effect.
+    # Presets may reference it to enable the underlying Pookalam foundation.
+    _spec("base","Pookalam Base","SYSTEM","Underlying Pookalam foundation layer used by presets.", triggers=("always",)),
     _spec("edge_glow","Neon Edge","EDGE FX","Soft luminous contour around the real Pookalam."),
     _spec("edge_trace","Moving Edge Trace","EDGE FX","Travelling highlight follows the detected boundary."),
     _spec("edge_electric","Electric Edge","EDGE FX","Animated electrical energy follows the contour."),
