@@ -13,6 +13,23 @@ def test_white_frame_detects_projector_rectangle():
     assert quad.shape == (4, 2)
 
 
+def test_white_frame_detects_saturated_flat_rectangle():
+    baseline = np.zeros((300, 500, 3), dtype=np.uint8)
+    frame = baseline.copy()
+    cv2.rectangle(frame, (60, 40), (440, 260), (255, 255, 255), -1)
+    quad = _detect_projector_rectangle(frame, baseline)
+    assert quad is not None
+    assert quad.shape == (4, 2)
+
+
+def test_white_frame_without_baseline_can_find_large_projection():
+    frame = np.zeros((300, 500, 3), dtype=np.uint8)
+    cv2.rectangle(frame, (70, 50), (430, 250), (220, 220, 220), -1)
+    quad = _detect_projector_rectangle(frame, None)
+    assert quad is not None
+    assert quad.shape == (4, 2)
+
+
 def test_white_model_builds_camera_response():
     frame = np.zeros((400, 600, 3), dtype=np.uint8)
     cv2.rectangle(frame, (80, 60), (520, 340), (180, 210, 240), -1)
