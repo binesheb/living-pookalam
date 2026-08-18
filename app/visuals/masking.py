@@ -64,7 +64,9 @@ class MaskedDrawAdapter:
         r = float(r)
         if self.mask.inside(x, y, r if not edge else 0, edge=edge):
             self.draw.circle(x, y, r, fill, width=width)
-        elif edge and self.mask.inside(x, y, edge=True) and r <= self.mask.edge_margin * 1.5:
+        elif self.mask.inside(x, y, edge=True) and r <= self.mask.edge_margin * 1.5:
+            # Small edge markers are allowed in the narrow band even when the
+            # caller does not explicitly pass edge=True.
             self.draw.circle(x, y, min(r, self.mask.edge_margin), fill, width=width)
 
     def ellipse(self, rect, fill, width=0, edge=False):
@@ -88,14 +90,13 @@ class MaskedDrawAdapter:
         sampled.append(pts[-1])
         clearance = max(0.0, float(width) * 0.5)
         segments = self.mask.line_segments(sampled, edge=edge, clearance=clearance)
-        if not segments and edge:
+        if not segments:
+            # Permit only the narrow edge band as a fallback for contour FX.
             segments = self.mask.line_segments(sampled, edge=True, clearance=0.0)
         for segment in segments:
             self.draw.line(segment, fill, width=width)
 
     def polygon(self, points, fill, edge=False):
         pts = [(float(p[0]), float(p[1])) for p in points]
-        if not pts:
-            return
-        if all(self.mask.inside(x, y, edge=edge) for x, y in pts):
+        if pts and all(self.mask.inside(x, y, edge=edge) for x, y in pts):
             self.draw.polygon(pts, fill)
