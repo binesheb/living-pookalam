@@ -68,22 +68,45 @@ def _dominant_colours(frame: np.ndarray, mask: np.ndarray, count: int = 6) -> tu
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0)
     k = min(count, max(1, len(sample)))
     _, _, centres = cv2.kmeans(sample, k, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
-    # Return RGB-like values for UI/effect metadata, while the source is BGR.
     return tuple(tuple(int(v) for v in c[::-1]) for c in centres)
 
 
 def _symmetry_order(mask: np.ndarray, centre: tuple[float, float]) -> int:
-    # Cheap radial symmetry estimate. Restrict to common Pookalam orders.
+    """Estimate radial symmetry on a small working image.
+
+    The previous implementation rotated the full camera-resolution mask for
+    every candidate order. On a 1280x720 webcam frame that meant dozens of
+    large warpAffine operations every few hundred milliseconds, starving the
+    Tk event loop. Symmetry is an approximate visual metric, so a 256px working
+    image is more than sufficient and keeps the field UI responsive.
+    """
     h, w = mask.shape
+    if h == 0 or w == 0:
+        return 1
+
+    max_dim = 256
+    scale = min(1.0, max_dim / float(max(h, w)))
+    if scale < 1.0:
+        sw = max(32, int(round(w * scale)))
+        sh = max(32, int(round(h * scale)))
+        small = cv2.resize(mask, (sw, sh), interpolation=cv2.INTER_NEAREST)
+    else:
+        small = mask
+        sw, sh = w, h
+
     cx, cy = centre
+    sx, sy = cx * sw / max(1, w), cy * sh / max(1, h)
+    base = small.astype(np.float32) / 255.0
     best_order, best_score = 1, -1.0
-    base = mask.astype(np.float32) / 255.0
+
+    # Common Pookalam symmetry orders. Keep the calculation deliberately
+    # bounded because this function runs while the live UI is active.
     for order in (4, 6, 8, 10, 12):
         score = 0.0
         for i in range(order):
             angle = 360.0 / order * i
-            mat = cv2.getRotationMatrix2D((cx, cy), angle, 1.0)
-            rotated = cv2.warpAffine(base, mat, (w, h), flags=cv2.INTER_NEAREST)
+            mat = cv2.getRotationMatrix2D((sx, sy), angle, 1.0)
+            rotated = cv2.warpAffine(base, mat, (sw, sh), flags=cv2.INTER_NEAREST)
             score += float(np.mean(1.0 - np.abs(base - rotated)))
         score /= order
         if score > best_score:
@@ -111,7 +134,6 @@ def analyze(frame: np.ndarray) -> PatternAnalysis:
     (_, _), radius = cv2.minEnclosingCircle(contour)
 
     edge_map = cv2.Canny(mask, 60, 160)
-    # A small contour approximation gives effects a stable path rather than thousands of noisy points.
     epsilon = max(1.0, 0.0025 * cv2.arcLength(contour, True))
     simplified = cv2.approxPolyDP(contour, epsilon, True)
     rings = tuple(float(radius * f) for f in (0.22, 0.38, 0.54, 0.70, 0.86))
