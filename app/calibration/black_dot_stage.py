@@ -1,9 +1,9 @@
 """White-field + black-dot geometry calibration stage.
 
 The projector first fills its complete field with white. Once the camera sees
-that illuminated quadrilateral, four large black targets are placed *inside*
-the white field. Black-on-white is deliberately used for geometry acquisition:
-it does not depend on projector colour reproduction or camera colour balance.
+that illuminated quadrilateral, four large black targets are placed inside the
+white field. Black-on-white is deliberately used for geometry acquisition: it
+does not depend on projector colour reproduction or camera colour balance.
 Colour calibration can then run as a separate photometric stage.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import time
 import cv2
 import numpy as np
 
-from app.calibration.staged import _detect_projector_rectangle, _order_quad
+from app.calibration.staged import _detect_projector_rectangle
 
 
 MARGIN = 0.12
@@ -50,7 +50,6 @@ def _black_dot(self, index):
     x, y = points[index]
     r = min(self.w, self.h) * DOT_RADIUS_FRACTION
 
-    # Large black acquisition target with a small white centre marker.
     self.canvas.create_oval(x-r, y-r, x+r, y+r, fill="black", outline="black")
     self.canvas.create_oval(x-r * 0.18, y-r * 0.18,
                             x+r * 0.18, y+r * 0.18,
@@ -86,8 +85,6 @@ def _detect_black_dot(frame: np.ndarray, expected_xy, radius: int):
         return None
 
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    # Adaptive thresholding is deliberately avoided here: the white field is
-    # the reference. We need the darkest connected target, not general edges.
     threshold = int(np.clip(np.percentile(gray, 12) + 12, 35, 120))
     mask = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY_INV)[1]
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
@@ -139,7 +136,6 @@ def _install():
         self.calib_index = -2
         self.calib_history = []
         self.calib_points = []
-        self.calib_color_samples = []
         self.calib_started = time.perf_counter()
         self.calib_baseline = None if self.frame is None else self.frame.copy()
         self.calib_stage = "WHITE_FIELD"
@@ -173,8 +169,6 @@ def _install():
         if self.calib_index == -1 or self.frame is None:
             return
 
-        # Stage 1: full white establishes the projector field and an initial
-        # camera -> projector transform.
         if self.calib_index == -2:
             if time.perf_counter() - self.calib_started < 1.2:
                 self.calib_detail.set("WHITE FIELD • allowing camera/projector exposure to settle…")
@@ -184,10 +178,8 @@ def _install():
                 self.calib_detail.set("WHITE FIELD • searching for the illuminated projector rectangle…")
                 return
             self.projection_quad = quad
-            proj_pts = np.float32([
-                (0, 0), (self.proj.w, 0),
-                (self.proj.w, self.proj.h), (0, self.proj.h),
-            ])
+            proj_pts = np.float32([(0, 0), (self.proj.w, 0),
+                                   (self.proj.w, self.proj.h), (0, self.proj.h)])
             H, _ = cv2.findHomography(quad, proj_pts, 0)
             if H is None:
                 self.calib_detail.set("WHITE FIELD • rectangle found, but initial geometry transform failed")
@@ -209,8 +201,6 @@ def _install():
             self.calib_progress.set("BLACK DOT 1 / 4")
             return
 
-        # Stage 2: black-on-white targets provide geometry without colour
-        # dependence. Eight stable observations are required for each target.
         p = self.detect_target(self.frame, self.calib_index)
         if p is None:
             self.calib_history = []
@@ -253,8 +243,6 @@ def _install():
             self.calib_progress.set(f"BLACK DOT {self.calib_index + 1} / 4")
             return
 
-        # Refine the initial white-field transform using the independently
-        # observed black-dot centres.
         camera_pts = np.asarray(self.calib_points, np.float32)
         projector_pts = _projector_points(self.proj)
         refined, _ = cv2.findHomography(camera_pts, projector_pts, cv2.RANSAC, 4.0)
@@ -278,9 +266,21 @@ def _install():
         self.calib_index = -1
         self.proj.black()
 
+    # Patch both the legacy base class and the actual production subclass.
+    # ProductFieldConsole defines its own calibration state machine, so patching
+    # only FieldConsole would leave the production GUI on the old colour workflow.
     FieldConsole.start_calibration = start_calibration
     FieldConsole.detect_target = detect_target
     FieldConsole.calibration_tick = calibration_tick
+
+    try:
+        from app.ui.field_product import ProductFieldConsole
+        ProductFieldConsole.start_calibration = start_calibration
+        ProductFieldConsole.detect_target = detect_target
+        ProductFieldConsole.calibration_tick = calibration_tick
+    except ImportError:
+        # Safe for direct module imports before the production console is loaded.
+        pass
 
 
 _install()
