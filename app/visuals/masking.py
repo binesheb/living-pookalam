@@ -65,6 +65,9 @@ class MaskedDrawAdapter:
         r = float(r)
         if self.mask.inside(x, y, r if not edge else 0, edge=edge):
             self.draw.circle(x, y, r, fill, width=width)
+        elif self.mask.inside(x, y, edge=True) and r <= self.mask.edge_margin * 1.5:
+            # Preserve narrow edge highlights without allowing large glows to spill.
+            self.draw.circle(x, y, min(r, self.mask.edge_margin), fill, width=width)
 
     def ellipse(self, rect, fill, width=0, edge=False):
         x1, y1, x2, y2 = map(float, rect)
@@ -75,7 +78,6 @@ class MaskedDrawAdapter:
 
     def line(self, points, fill, width=1, edge=False):
         pts = [(float(p[0]), float(p[1])) for p in points]
-        # Sample long segments so an effect cannot jump across the mask.
         sampled: list[tuple[float, float]] = []
         for a, b in zip(pts, pts[1:]):
             d = math.hypot(b[0] - a[0], b[1] - a[1])
@@ -84,7 +86,11 @@ class MaskedDrawAdapter:
                 q = i / steps
                 sampled.append((a[0] + (b[0] - a[0]) * q, a[1] + (b[1] - a[1]) * q))
         sampled.append(pts[-1])
-        for segment in self.mask.line_segments(sampled, edge=edge):
+        segments = self.mask.line_segments(sampled, edge=edge)
+        if not segments:
+            # Edge FX may occupy a narrow band around the detected contour.
+            segments = self.mask.line_segments(sampled, edge=True)
+        for segment in segments:
             self.draw.line(segment, fill, width=width)
 
     def polygon(self, points, fill, edge=False):
