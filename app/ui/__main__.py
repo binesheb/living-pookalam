@@ -36,12 +36,16 @@ def launch() -> None:
 
     def load_application() -> None:
         try:
-            # Calibration layers are installed in order.  The white-field +
-            # black-dot stage deliberately runs after the legacy staged module
-            # so its target renderer/detector become the active field workflow.
+            # Import the production console first. The black-dot calibration
+            # layer patches the concrete production class as well as the legacy
+            # FieldConsole base class. This prevents the production GUI from
+            # silently retaining the old MAGENTA/CYAN/YELLOW/GREEN workflow.
+            product_module = __import__(
+                "app.ui.field_product", fromlist=["ProductFieldConsole"]
+            )
             __import__("app.calibration.staged")
             __import__("app.calibration.black_dot_stage")
-            result["console"] = __import__("app.ui.field_product", fromlist=["ProductFieldConsole"]).ProductFieldConsole
+            result["console"] = product_module.ProductFieldConsole
         except Exception:
             result["error"] = traceback.format_exc()
 
