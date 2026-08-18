@@ -1,9 +1,4 @@
-"""Field-ready Live Pookalam operator console.
-
-The UI mirrors the approved Live Pookalam mockup: dark control-room layout,
-purple accent, workflow navigation, live camera/projector previews, calibration
-status, effects, show control, developer diagnostics and field-service tools.
-"""
+"""Field-ready Live Pookalam operator console."""
 from __future__ import annotations
 
 import json
@@ -158,6 +153,13 @@ class ProjectionWindow:
                                 fill=TEXT, font=("Segoe UI", 28, "bold"))
 
     def target(self, index):
+        """Project a large, easy-to-acquire target followed by a precision marker.
+
+        The large filled disc is intentionally much larger than the old 3.2% target.
+        A high-contrast ring, crosshair and small centre marker let the camera first
+        acquire the colour blob and then refine the centre without requiring a
+        top-down camera.
+        """
         self.clear()
         margin = 0.12
         pts = [(self.w*margin, self.h*margin),
@@ -166,13 +168,27 @@ class ProjectionWindow:
                (self.w*margin, self.h*(1-margin))]
         x, y = pts[index]
         name, color = self.TARGETS[index]
-        r = min(self.w, self.h) * 0.032
-        self.canvas.create_oval(x-r, y-r, x+r, y+r, fill=color, outline="white", width=5)
-        self.canvas.create_text(x, y, text=str(index+1), fill="black",
-                                font=("Segoe UI", 24, "bold"))
+        r = min(self.w, self.h) * 0.075
+        inner = r * 0.34
+        # Large acquisition disc.
+        self.canvas.create_oval(x-r, y-r, x+r, y+r, fill=color, outline="white", width=7)
+        # Precision ring and centre marker.
+        self.canvas.create_oval(x-inner, y-inner, x+inner, y+inner,
+                                fill="black", outline="white", width=5)
+        self.canvas.create_oval(x-inner*0.28, y-inner*0.28,
+                                x+inner*0.28, y+inner*0.28,
+                                fill="white", outline="white")
+        arm = r * 1.18
+        self.canvas.create_line(x-arm, y, x-r*0.52, y, fill="white", width=4)
+        self.canvas.create_line(x+r*0.52, y, x+arm, y, fill="white", width=4)
+        self.canvas.create_line(x, y-arm, x, y-r*0.52, fill="white", width=4)
+        self.canvas.create_line(x, y+r*0.52, x, y+arm, fill="white", width=4)
         self.canvas.create_text(self.w/2, self.h*0.50,
                                 text=f"CALIBRATING  •  TARGET {index+1}  {name}",
                                 fill=color, font=("Segoe UI", 26, "bold"))
+        self.canvas.create_text(self.w/2, self.h*0.55,
+                                text="ACQUIRE COLOUR  →  PINPOINT CENTRE",
+                                fill=TEXT, font=("Segoe UI", 14, "bold"))
 
     def render(self, interaction=None, contour=None):
         self.clear()
@@ -229,11 +245,11 @@ class FieldConsole:
         self.confidence = 0.0
         self.calib_index = -1
         self.calib_history = []
+        self.calib_points = []
         self.calib_started = 0.0
         self.build()
         self.tick()
 
-    # ---------- common UI ----------
     def button(self, parent, text, command, primary=False, width=None):
         b = tk.Button(parent, text=text, command=command,
                        bg=PURPLE if primary else PANEL3,
@@ -346,7 +362,6 @@ class FieldConsole:
         method = getattr(self, f"page_{key}", self.page_home)
         method()
 
-    # ---------- pages ----------
     def page_home(self):
         self.page_title("Dashboard", "Monitor the installation, calibration and live experience from one screen.")
         row = tk.Frame(self.main, bg=BG); row.pack(fill="x")
@@ -487,7 +502,6 @@ class FieldConsole:
         self.page_title("Help", "Field workflow for Live Pookalam.")
         tk.Label(self.main, text="SOURCE → CALIBRATE → DETECT → EXPERIENCE → RUN SHOW\n\nMove either camera or projector? Press CALIBRATE and let the automated four-target sequence complete.\n\nDeveloper Mode projects the real camera segmentation edge for verification.\n\nESC stops the show. F11 toggles fullscreen.", bg=BG, fg=TEXT, justify="left", font=("Segoe UI", 11)).pack(anchor="nw", pady=20)
 
-    # ---------- hardware / actions ----------
     def set_source(self, key):
         self.state["source"] = key; save_state(self.state); self.show_page("source")
 
@@ -506,12 +520,16 @@ class FieldConsole:
 
     def start_calibration(self):
         self.open_projector(); self.stop_show(); self.open_projector()
-        self.calib_index = 0; self.calib_history = []; self.calib_started = time.perf_counter()
+        self.calib_index = 0
+        self.calib_history = []
+        self.calib_points = []
+        self.calib_started = time.perf_counter()
         self.proj.target(0)
         self.calib_status.set("CALIBRATING • TARGET 1 / 4")
-        self.calib_detail.set("Point the webcam at the projected target. Acquisition is automatic.")
+        self.calib_detail.set("Large target acquisition: finding MAGENTA. Centre will be refined after lock.")
         for i,(var,lab) in enumerate(self.calib_labels): var.set(f"{i+1}   {ProjectionWindow.TARGETS[i][0]}   {'ACTIVE' if i==0 else 'WAITING'}"); lab.configure(fg=PURPLE if i==0 else MUTED)
         self.calib_progress.set("0 / 4")
+        self.calib_error.set("Reprojection error: PENDING")
 
     def stop_calibration(self):
         self.calib_index = -1
@@ -519,38 +537,85 @@ class FieldConsole:
         if hasattr(self, "calib_status"): self.calib_status.set("CALIBRATION STOPPED")
 
     def detect_target(self, frame, index):
+        """Two-stage colour target acquisition: coarse blob, then precise centre.
+
+        The projected target is intentionally large. We first find the largest
+        saturated colour region, then use a tighter ROI around that region and
+        moments to pinpoint its centre. This is substantially more tolerant of
+        oblique camera views and projector defocus than detecting a small circle.
+        """
+        if frame is None or frame.size == 0 or not 0 <= index < 4:
+            return None
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        ranges = [(145,175), (85,110), (20,40), (45,85)]
-        lo,hi = ranges[index]
-        mask = cv2.inRange(hsv, (lo,90,80), (hi,255,255))
+        ranges = [(140, 178), (82, 112), (18, 43), (42, 90)]
+        lo, hi = ranges[index]
+        # Lower saturation/value thresholds make acquisition tolerant of a real
+        # floor, projector angle and camera auto-exposure while hue remains the
+        # primary discriminator.
+        mask = cv2.inRange(hsv, (lo, 55, 45), (hi, 255, 255))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
         contours,_ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        candidates=[c for c in contours if 0.00005*frame.shape[0]*frame.shape[1] < cv2.contourArea(c) < 0.05*frame.shape[0]*frame.shape[1]]
-        if not candidates:return None
-        c=max(candidates,key=cv2.contourArea); m=cv2.moments(c)
-        if not m["m00"]:return None
-        return (m["m10"]/m["m00"],m["m01"]/m["m00"])
+        fh, fw = frame.shape[:2]
+        min_area = max(300.0, 0.00015 * fw * fh)
+        max_area = 0.20 * fw * fh
+        candidates=[]
+        for c in contours:
+            area=float(cv2.contourArea(c))
+            if not min_area <= area <= max_area:
+                continue
+            x,y,w,h=cv2.boundingRect(c)
+            aspect=min(w,h)/max(w,h)
+            if aspect < 0.35:
+                continue
+            per=cv2.arcLength(c,True)
+            circularity=0.0 if per <= 0 else min(1.0,4*np.pi*area/(per*per))
+            candidates.append((area,circularity,aspect,c))
+        if not candidates:
+            return None
+        # Prefer a large, compact colour blob. Under oblique projection the disc
+        # can be elliptical, so circularity is only a secondary score.
+        area,circularity,aspect,c=max(candidates,key=lambda item:item[0]*(0.7+0.2*item[1]+0.1*item[2]))
+        m=cv2.moments(c)
+        if abs(m["m00"]) < 1e-6:
+            return None
+        cx=m["m10"]/m["m00"]; cy=m["m01"]/m["m00"]
+        # Precision pass: search a smaller region around the coarse centre. This
+        # rejects coloured Pookalam material elsewhere in the frame.
+        radius=max(18.0, min(w,h)*0.32)
+        x0=max(0,int(cx-radius)); y0=max(0,int(cy-radius))
+        x1=min(fw,int(cx+radius)); y1=min(fh,int(cy+radius))
+        roi=hsv[y0:y1,x0:x1]
+        if roi.size:
+            fine=cv2.inRange(roi,(lo,70,55),(hi,255,255))
+            fine=cv2.morphologyEx(fine,cv2.MORPH_OPEN,np.ones((3,3),np.uint8))
+            fm=cv2.moments(fine)
+            if abs(fm["m00"]) > 1e-6:
+                cx=x0+fm["m10"]/fm["m00"]
+                cy=y0+fm["m01"]/fm["m00"]
+        return (float(cx),float(cy))
 
     def calibration_tick(self):
         if self.calib_index < 0 or self.frame is None:return
         p=self.detect_target(self.frame,self.calib_index)
         if p is None:
             self.calib_history=[]
-            self.calib_detail.set("Searching for the active projected target…")
+            self.calib_detail.set(f"Target {self.calib_index+1}: acquiring large {ProjectionWindow.TARGETS[self.calib_index][0]} target…")
             return
         self.calib_history.append(p)
         if len(self.calib_history) > 8:self.calib_history.pop(0)
         if len(self.calib_history) < 8:
-            self.calib_detail.set(f"Target {self.calib_index+1}: stable frames {len(self.calib_history)}/8")
+            self.calib_detail.set(f"Target {self.calib_index+1}: acquired • pinpointing centre {len(self.calib_history)}/8")
             return
         arr=np.array(self.calib_history,np.float32); mean=arr.mean(0); spread=float(np.max(np.linalg.norm(arr-mean,axis=1)))
-        self.calib_detail.set(f"Target {self.calib_index+1}: stable • jitter {spread:.1f}px")
+        self.calib_detail.set(f"Target {self.calib_index+1}: centre locked • jitter {spread:.1f}px")
         if spread > 12:return
-        self.calib_points.append(tuple(mean)) if hasattr(self,'calib_points') else setattr(self,'calib_points',[tuple(mean)])
+        self.calib_points.append(tuple(mean))
         idx=self.calib_index; self.calib_labels[idx][0].set(f"{idx+1}   {ProjectionWindow.TARGETS[idx][0]}   LOCKED"); self.calib_labels[idx][1].configure(fg=GREEN)
         self.calib_progress.set(f"{idx+1} / 4"); self.calib_history=[]
         if idx < 3:
             self.calib_index += 1; self.proj.target(self.calib_index); self.calib_labels[self.calib_index][0].set(f"{self.calib_index+1}   {ProjectionWindow.TARGETS[self.calib_index][0]}   ACTIVE"); self.calib_labels[self.calib_index][1].configure(fg=PURPLE); return
-        cam=np.float32(self.calib_points); margin=.12; dst=np.float32([(self.proj.w*margin,self.proj.h*margin),(self.proj.w*(1-margin),self.proj.h*margin),(self.proj.w*(1-margin),self.proj.h*(1-margin)),(self.proj.w*margin,self.proj.h*(1-margin))]); H,_=cv2.findHomography(cam,dst,cv2.RANSAC); 
+        cam=np.float32(self.calib_points); margin=.12; dst=np.float32([(self.proj.w*margin,self.proj.h*margin),(self.proj.w*(1-margin),self.proj.h*margin),(self.proj.w*(1-margin),self.proj.h*(1-margin)),(self.proj.w*margin,self.proj.h*(1-margin))]); H,_=cv2.findHomography(cam,dst,cv2.RANSAC)
         if H is None:self.stop_calibration(); self.calib_status.set("CALIBRATION FAILED"); return
         self.H=H; self.state["homography"]=H.tolist(); self.state["projector_width"]=self.proj.w; self.state["projector_height"]=self.proj.h; save_state(self.state); self.calib_error.set("Reprojection error: VALID"); self.calib_status.set("CALIBRATION COMPLETE"); self.calib_detail.set("New map accepted. The previous map was retained until this point."); self.calib_index=-1; self.proj.black()
 
@@ -615,17 +680,9 @@ class FieldConsole:
     def toggle_fullscreen(self): self.root.attributes("-fullscreen", not bool(self.root.attributes("-fullscreen")))
 
     def close(self, restart=False):
-        try:self.cap.release()
-        except Exception:pass
-        if self.proj:
-            try:self.proj.win.destroy()
-            except Exception:pass
-        if not restart:self.root.destroy()
-
-
-def launch():
-    root=tk.Tk(); FieldConsole(root); root.mainloop()
-
-
-if __name__ == "__main__":
-    launch()
+        try:
+            self.cap.release()
+            if self.proj:self.proj.win.destroy()
+        finally:
+            self.root.destroy()
+        if restart: return
