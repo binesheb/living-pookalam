@@ -1,7 +1,8 @@
 # LIVE POOKALAM
 
 **Interactive Projection Experience for Onam**  
-**developed by bnsh.eb**
+**developed by bnsh.eb**  
+**Field Release Candidate: 1.0.0-rc3**
 
 Live Pookalam is a reusable Windows 11 platform that turns a physical Pookalam, a digital Pookalam, or both into an interactive projection canvas. It is designed to be installed repeatedly across showrooms without changing the application core.
 
@@ -38,7 +39,7 @@ Or launch `run_windows.bat`.
 ## Sources
 
 ### Digital
-Upload a Pookalam image. The pattern analyzer extracts a usable boundary, centre, radial rings, dominant colours, edges and symmetry so effects can be previewed without a physical installation.
+Upload a Pookalam image. The pattern analyzer extracts a usable boundary, centre, radial rings, dominant colours, edges and symmetry so effects can be previewed without a physical installation. The production projector uses an alpha mask so the source image itself cannot expose a rectangular floor frame.
 
 ### Physical
 The webcam observes the real flower Pookalam. The deterministic vision layer derives a contour/mask and geometry from the live feed.
@@ -56,7 +57,7 @@ The mask is generated after camera → projector mapping, so it works with an ob
 
 ## Calibration
 
-Calibration is an automated, repeatable camera → projector mapping sequence. Only the currently projected, uniquely coloured target is valid, reducing false locks from wallpaper or room content. A new mapping is accepted only after stable observations and validation; the previous mapping remains available until a valid replacement exists.
+Calibration is an automated, repeatable camera → projector mapping sequence. Only the currently projected, uniquely coloured target is valid, reducing false locks from wallpaper or room content. Eight stable observations are required for each target, followed by homography/reprojection validation. A new mapping is accepted only after validation; the previous mapping remains available until a valid replacement exists.
 
 Move the projector or webcam? Press **CALIBRATE** and run the sequence again. No application restart is required.
 
@@ -162,8 +163,8 @@ A showroom should not require a code fork.
 
 ## Production roadmap
 
-- robust marker calibration and lens correction
-- floor-plane rectification
+- lens correction
+- floor-plane rectification refinements
 - editable Pookalam region masks
 - flower/motif semantic recognition
 - GPU compositor for high-resolution projection
