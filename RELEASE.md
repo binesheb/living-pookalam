@@ -1,26 +1,29 @@
-# LIVE POOKALAM 1.0.0-rc2
+# LIVE POOKALAM 1.0.0-rc3
 
 ## Release status
 
-**Field Release Candidate 2** — Windows 11.
+**Field Release Candidate 3** — Windows 11.
 
-This release consolidates automated calibration, pattern analysis, Pookalam-only projection masking, Living Effects and the approved operator workflow. RC2 specifically hardens the production projector path so the actual launched application cannot pass an unsupported mask argument to the effect engine and cannot display an unmasked digital rectangle.
+This release consolidates automated calibration, pattern analysis, Pookalam-only projection masking, Living Effects and the approved operator workflow. RC3 additionally makes the **actual production launcher** use the robust four-target calibration state machine; the demo/legacy calibration path is no longer the release path.
 
 ## Release gates
 
 ### Software
 
 - [x] Automated four-target calibration
+- [x] One active colour target at a time
 - [x] Stable-frame target locking
 - [x] Reprojection-error validation
-- [x] Previous calibration retained on failed recalibration
+- [x] Failed recalibration leaves the previous valid map untouched
+- [x] Calibration can be rerun after projector/webcam movement
 - [x] Digital Pookalam source is alpha-masked to detected geometry
 - [x] Physical/hybrid effects are rendered only through the projector-space mask
 - [x] Projector-resolution scaling after calibration
 - [x] Developer edge overlay is available
 - [x] Pattern analysis and effect library are integrated
 - [x] Regression tests for calibration, segmentation, pattern analysis, effects and compositor
-- [x] Python compile/import gate in CI
+- [x] Production UI import gate in CI
+- [x] Python compile gate in CI
 - [x] Windows launcher/update workflow retained
 - [x] Production projector path reviewed separately from preview/demo path
 
@@ -31,7 +34,7 @@ The RC is **not** declared a final production release until it passes on the act
 Required field tests:
 
 1. Projector and webcam placed on the same side of the Pookalam.
-2. Automated calibration completed from start to finish.
+2. Automated calibration completes without manual point selection.
 3. Projector moved, calibration rerun, and mapping verified.
 4. Physical Pookalam detected without wallpaper/background becoming the contour.
 5. Developer Mode edge overlay lands on the real flower boundary.
