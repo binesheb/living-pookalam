@@ -1,12 +1,14 @@
 """Staged field calibration for Live Pookalam.
 
-The physical sequence is deliberately:
-1. white projection -> camera/surface baseline + projected rectangle
-2. four large colour targets -> learn observed camera colours and refine centres
-3. geometry/reprojection -> only after the colour model is known
+Physical calibration is deliberately separated into reliable stages:
+1. full-white projection -> camera/surface baseline + projector quadrilateral
+2. large black dots on that white field -> geometry points
+3. geometry/reprojection validation
+4. colour calibration can run independently after geometry is locked
 
-This module patches the existing Tk field console at startup so the operator gets
-one automated workflow without replacing the established renderer.
+The first geometry stage intentionally does not depend on projector colour
+reproduction. This is important for side-mounted cameras where cyan/yellow may
+clip toward white in the camera image.
 """
 from __future__ import annotations
 
@@ -29,45 +31,39 @@ def _projector_black(self):
 
 
 def _target(self, index):
+    """Project a large black acquisition dot on the white projector field."""
     self.clear()
-    self.canvas.configure(bg="black")
+    self.canvas.configure(bg="white")
     margin = 0.12
     pts = [(self.w * margin, self.h * margin),
            (self.w * (1 - margin), self.h * margin),
            (self.w * (1 - margin), self.h * (1 - margin)),
            (self.w * margin, self.h * (1 - margin))]
     x, y = pts[index]
-    name, color = self.TARGETS[index]
-    r = min(self.w, self.h) * 0.105
-    inner = r * 0.30
-    self.canvas.create_oval(x-r, y-r, x+r, y+r, fill=color, outline="white", width=8)
+    r = min(self.w, self.h) * 0.075
+    inner = r * 0.34
+    self.canvas.create_oval(x-r, y-r, x+r, y+r, fill="black", outline="white", width=6)
     self.canvas.create_oval(x-inner, y-inner, x+inner, y+inner,
-                            fill="black", outline="white", width=5)
-    self.canvas.create_oval(x-inner*0.22, y-inner*0.22,
-                            x+inner*0.22, y+inner*0.22,
-                            fill="white", outline="white")
-    arm = r * 1.12
-    for a, b in [((x-arm, y), (x-r*0.50, y)),
-                 ((x+r*0.50, y), (x+arm, y)),
-                 ((x, y-arm), (x, y-r*0.50)),
-                 ((x, y+r*0.50), (x, y+arm))]:
-        self.canvas.create_line(*a, *b, fill="white", width=4)
+                            fill="white", outline="black", width=3)
+    self.canvas.create_oval(x-inner*0.25, y-inner*0.25,
+                            x+inner*0.25, y+inner*0.25,
+                            fill="black", outline="black")
+    arm = r * 1.25
+    for a, b in [((x-arm, y), (x-r*1.02, y)),
+                 ((x+r*1.02, y), (x+arm, y)),
+                 ((x, y-arm), (x, y-r*1.02)),
+                 ((x, y+r*1.02), (x, y+arm))]:
+        self.canvas.create_line(*a, *b, fill="black", width=4)
     self.canvas.create_text(self.w/2, self.h*0.50,
-                            text=f"CALIBRATING  •  TARGET {index+1}  {name}",
-                            fill=color, font=("Segoe UI", 26, "bold"))
+                            text=f"GEOMETRY  •  TARGET {index+1}",
+                            fill="#111111", font=("Segoe UI", 26, "bold"))
     self.canvas.create_text(self.w/2, self.h*0.55,
-                            text="ACQUIRE LARGE COLOUR  →  PINPOINT CENTRE",
-                            fill="white", font=("Segoe UI", 14, "bold"))
+                            text="BLACK DOT • ACQUIRE → PINPOINT CENTRE",
+                            fill="#333333", font=("Segoe UI", 14, "bold"))
 
 
 def _detect_projector_rectangle(frame: np.ndarray, baseline: Optional[np.ndarray]):
-    """Return a camera-space quadrilateral for the illuminated projector area.
-
-    A percentile over the whole image can equal the projector's peak value when
-    the white frame is saturated or nearly binary. That makes ``THRESH_BINARY``
-    discard the projector rectangle. Threshold from positive response pixels and
-    cap the threshold below the measured peak instead.
-    """
+    """Return a camera-space quadrilateral for the illuminated projector area."""
     if frame is None or frame.size == 0:
         return None
 
@@ -144,33 +140,51 @@ def _white_model(frame, quad):
     }
 
 
-def _apply_white_balance(frame, gains):
-    g = np.asarray(gains, dtype=np.float32).reshape(1, 1, 3)
-    return np.clip(frame.astype(np.float32) * g, 0, 255).astype(np.uint8)
-
-
-def _colour_sample(frame, expected_bgr, expected_xy, radius):
-    """Find the most target-like pixels near the predicted corner."""
-    h, w = frame.shape[:2]
+def _detect_black_dot(frame: np.ndarray, expected_xy, radius: int):
+    """Detect the dark circular geometry target inside a known white field."""
+    if frame is None or frame.size == 0:
+        return None
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
     cx, cy = int(expected_xy[0]), int(expected_xy[1])
-    r = int(radius)
+    r = max(24, int(radius))
     x0, x1 = max(0, cx-r), min(w, cx+r)
     y0, y1 = max(0, cy-r), min(h, cy+r)
-    roi = frame[y0:y1, x0:x1]
+    roi = gray[y0:y1, x0:x1]
     if roi.size == 0:
         return None
-    lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB).astype(np.float32)
-    target = cv2.cvtColor(np.uint8([[expected_bgr]]), cv2.COLOR_BGR2LAB)[0, 0].astype(np.float32)
-    dist = np.linalg.norm(lab - target, axis=2)
-    sat = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)[:, :, 1].astype(np.float32)
-    score = dist - 0.18 * sat
-    limit = np.percentile(score, 5)
-    pixels = roi[score <= limit]
-    if len(pixels) < 20:
+
+    # Dark-on-white is intentionally simple and robust against colour clipping.
+    local_white = float(np.percentile(roi, 75))
+    threshold = int(np.clip(local_white * 0.45, 25, 120))
+    mask = cv2.threshold(roi, threshold, 255, cv2.THRESH_BINARY_INV)[1]
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
         return None
-    observed = np.median(pixels, axis=0).astype(np.float32)
-    ys, xs = np.where(score <= limit)
-    return (float(x0 + np.median(xs)), float(y0 + np.median(ys))), observed
+
+    best = None
+    for c in contours:
+        area = cv2.contourArea(c)
+        if area < 0.001 * roi.shape[0] * roi.shape[1]:
+            continue
+        peri = cv2.arcLength(c, True)
+        circularity = 4.0 * np.pi * area / max(peri * peri, 1.0)
+        if circularity < 0.35:
+            continue
+        m = cv2.moments(c)
+        if not m["m00"]:
+            continue
+        px = x0 + m["m10"] / m["m00"]
+        py = y0 + m["m01"] / m["m00"]
+        distance = float(np.hypot(px-cx, py-cy))
+        score = area * max(0.05, circularity) / (1.0 + distance)
+        if best is None or score > best[0]:
+            best = (score, px, py)
+    return None if best is None else (float(best[1]), float(best[2]))
 
 
 def _install():
@@ -192,54 +206,41 @@ def _install():
         self.calib_baseline = None if self.frame is None else self.frame.copy()
         self.calib_stage = "WHITE"
         self.proj.white()
-        self.calib_status.set("CALIBRATING • WHITE SURFACE")
-        self.calib_detail.set("Projecting full white. Measuring camera response and projector rectangle…")
+        self.calib_status.set("CALIBRATING • WHITE FIELD")
+        self.calib_detail.set("Projecting full white. Finding the complete projector area and measuring camera response…")
         for i, (var, lab) in enumerate(self.calib_labels):
-            var.set(f"{i+1}   {ProjectionWindow.TARGETS[i][0]}   WAITING")
+            var.set(f"{i+1}   GEOMETRY DOT   WAITING")
             lab.configure(fg="#9c95aa")
-        self.calib_progress.set("SURFACE")
+        self.calib_progress.set("WHITE FIELD")
         self.calib_error.set("Reprojection error: PENDING")
 
     def detect_target(self, frame, index):
-        if getattr(self, "projection_quad", None) is not None and self.H is not None:
-            margin = 0.12
-            p = np.float32([[self.proj.w*margin, self.proj.h*margin],
-                            [self.proj.w*(1-margin), self.proj.h*margin],
-                            [self.proj.w*(1-margin), self.proj.h*(1-margin)],
-                            [self.proj.w*margin, self.proj.h*(1-margin)]])[index]
-            cp = cv2.perspectiveTransform(p.reshape(1, 1, 2), np.linalg.inv(self.H)).reshape(2)
-            expected = self.proj.TARGETS[index][1]
-            sample_frame = frame
-            wb = self.state.get("colour_profile", {}).get("white_balance_gains_bgr")
-            if wb:
-                sample_frame = _apply_white_balance(frame, wb)
-            rgb = tuple(int(expected.lstrip("#")[i:i+2], 16) for i in (0,2,4))
-            result = _colour_sample(sample_frame, np.array(rgb[::-1], np.uint8), cp,
-                                    max(80, int(min(frame.shape[:2]) * 0.18)))
-            if result:
-                return result[0]
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        ranges = [(130,179), (70,120), (15,45), (35,95)]
-        lo, hi = ranges[index]
-        mask = cv2.inRange(hsv, (lo,70,45), (hi,255,255))
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        candidates = [c for c in contours if 0.00003*frame.shape[0]*frame.shape[1] < cv2.contourArea(c) < 0.10*frame.shape[0]*frame.shape[1]]
-        if not candidates:
+        if getattr(self, "projection_quad", None) is None or self.H is None:
             return None
-        c = max(candidates, key=cv2.contourArea)
-        m = cv2.moments(c)
-        return None if not m["m00"] else (m["m10"]/m["m00"], m["m01"]/m["m00"])
+        margin = 0.12
+        projector_points = np.float32([
+            [self.proj.w*margin, self.proj.h*margin],
+            [self.proj.w*(1-margin), self.proj.h*margin],
+            [self.proj.w*(1-margin), self.proj.h*(1-margin)],
+            [self.proj.w*margin, self.proj.h*(1-margin)],
+        ])
+        camera_points = cv2.perspectiveTransform(
+            projector_points.reshape(-1, 1, 2), np.linalg.inv(self.H)
+        ).reshape(-1, 2)
+        expected = camera_points[index]
+        return _detect_black_dot(frame, expected, max(50, int(min(frame.shape[:2]) * 0.16)))
 
     def calibration_tick(self):
         if self.calib_index == -1 or self.frame is None:
             return
+
         if self.calib_index == -2:
             if time.perf_counter() - self.calib_started < 1.2:
                 self.calib_detail.set("WHITE • allowing projector/camera exposure to settle…")
                 return
             quad = _detect_projector_rectangle(self.frame, self.calib_baseline)
             if quad is None:
-                self.calib_detail.set("WHITE • projector rectangle not locked yet. Increase contrast or wait…")
+                self.calib_detail.set("WHITE • searching for the complete bright projector rectangle…")
                 return
             self.projection_quad = quad
             model = _white_model(self.frame, quad)
@@ -257,72 +258,81 @@ def _install():
             self.state["projector_width"] = self.proj.w
             self.state["projector_height"] = self.proj.h
             self.state["surface_rectangle_camera"] = quad.tolist()
-            self.state["calibration_stage"] = "COLOUR_TARGETS"
+            self.state["calibration_stage"] = "BLACK_GEOMETRY"
             self.proj.target(0)
             self.calib_index = 0
             self.calib_history = []
-            self.calib_labels[0][0].set("1   MAGENTA   ACTIVE")
-            self.calib_labels[0][1].configure(fg="#8b35ff")
-            self.calib_status.set("CALIBRATING • COLOUR TARGETS")
-            self.calib_detail.set("White baseline locked. Learning the camera-observed colour of each projected target…")
-            self.calib_progress.set("COLOUR 0 / 4")
+            self.calib_labels[0][0].set("1   BLACK DOT   ACTIVE")
+            self.calib_labels[0][1].configure(fg="#32e875")
+            self.calib_status.set("CALIBRATING • BLACK GEOMETRY")
+            self.calib_detail.set("White field locked. Acquiring black geometry dot 1…")
+            self.calib_progress.set("GEOMETRY 0 / 4")
             return
 
         p = self.detect_target(self.frame, self.calib_index)
         if p is None:
             self.calib_history = []
-            self.calib_detail.set(f"Target {self.calib_index+1}: acquiring large {self.proj.TARGETS[self.calib_index][0]} target…")
+            self.calib_detail.set(f"Geometry dot {self.calib_index+1}: acquiring dark circle in predicted region…")
             return
         self.calib_history.append(p)
         if len(self.calib_history) > 8:
             self.calib_history.pop(0)
         if len(self.calib_history) < 8:
-            self.calib_detail.set(f"Target {self.calib_index+1}: acquired • pinpointing centre {len(self.calib_history)}/8")
+            self.calib_detail.set(f"Geometry dot {self.calib_index+1}: acquired • pinpointing centre {len(self.calib_history)}/8")
             return
         arr = np.array(self.calib_history, np.float32)
         mean = arr.mean(0)
         spread = float(np.max(np.linalg.norm(arr-mean, axis=1)))
-        self.calib_detail.set(f"Target {self.calib_index+1}: centre locked • jitter {spread:.1f}px")
+        self.calib_detail.set(f"Geometry dot {self.calib_index+1}: centre locked • jitter {spread:.1f}px")
         if spread > 12:
             return
+
         idx = self.calib_index
-        expected = self.proj.TARGETS[idx][1]
-        rgb = tuple(int(expected.lstrip("#")[i:i+2], 16) for i in (0,2,4))
-        frame = self.frame
-        wb = self.state.get("colour_profile", {}).get("white_balance_gains_bgr")
-        if wb:
-            frame = _apply_white_balance(frame, wb)
-        x, y = int(mean[0]), int(mean[1])
-        rr = max(10, int(min(frame.shape[:2]) * 0.025))
-        patch = frame[max(0,y-rr):min(frame.shape[0],y+rr), max(0,x-rr):min(frame.shape[1],x+rr)]
-        observed = np.median(patch.reshape(-1,3), axis=0) if patch.size else np.array([0,0,0])
-        self.calib_color_samples.append({"target": self.proj.TARGETS[idx][0], "desired_bgr": list(rgb[::-1]), "observed_bgr": observed.astype(float).tolist()})
         self.calib_points.append(tuple(mean))
-        self.calib_labels[idx][0].set(f"{idx+1}   {self.proj.TARGETS[idx][0]}   COLOUR LOCKED")
+        self.calib_labels[idx][0].set(f"{idx+1}   BLACK DOT   LOCKED")
         self.calib_labels[idx][1].configure(fg="#32e875")
-        self.calib_progress.set(f"COLOUR {idx+1} / 4")
+        self.calib_progress.set(f"GEOMETRY {idx+1} / 4")
         self.calib_history = []
         if idx < 3:
             self.calib_index += 1
             self.proj.target(self.calib_index)
-            self.calib_labels[self.calib_index][0].set(f"{self.calib_index+1}   {self.proj.TARGETS[self.calib_index][0]}   ACTIVE")
-            self.calib_labels[self.calib_index][1].configure(fg="#8b35ff")
+            self.calib_labels[self.calib_index][0].set(f"{self.calib_index+1}   BLACK DOT   ACTIVE")
+            self.calib_labels[self.calib_index][1].configure(fg="#32e875")
             return
-        self.state["colour_profile"]["targets"] = self.calib_color_samples
-        self.state["calibration_stage"] = "REPROJECTION"
+
+        # The four black dots are observed in camera space. Their known projector
+        # coordinates refine the initial white-field homography.
+        observed = np.float32(self.calib_points)
+        margin = 0.12
+        expected = np.float32([
+            [self.proj.w*margin, self.proj.h*margin],
+            [self.proj.w*(1-margin), self.proj.h*margin],
+            [self.proj.w*(1-margin), self.proj.h*(1-margin)],
+            [self.proj.w*margin, self.proj.h*(1-margin)],
+        ])
+        H, _ = cv2.findHomography(observed, expected, 0)
+        if H is None:
+            self.calib_detail.set("BLACK GEOMETRY • refinement failed; retrying calibration…")
+            self.calib_index = 0
+            self.calib_points = []
+            self.proj.target(0)
+            return
+        self.H = H.astype(np.float32)
         self.state["homography"] = self.H.tolist()
-        self.state["projector_width"] = self.proj.w
-        self.state["projector_height"] = self.proj.h
-        self.state["colour_profile"]["valid"] = True
-        self.state["surface_calibration_valid"] = True
+        self.state["geometry_points_camera"] = observed.tolist()
+        self.state["geometry_points_projector"] = expected.tolist()
+        self.state["calibration_stage"] = "REPROJECTION"
         self.state["geometry_from_white"] = True
+        self.state["surface_calibration_valid"] = True
         self.state["reprojection_error"] = None
         self.state["reprojection_status"] = "PENDING"
+        self.state["colour_calibration_pending"] = True
         from app.ui.field_ui import save_state
         save_state(self.state)
         self.calib_error.set("Reprojection error: PENDING")
-        self.calib_status.set("COLOUR CALIBRATION COMPLETE")
-        self.calib_detail.set("Camera/projector colour response learned. Next step is independent reprojection validation.")
+        self.calib_status.set("GEOMETRY CALIBRATION COMPLETE")
+        self.calib_detail.set("White field + black geometry locked. Ready for independent reprojection and colour calibration.")
+        self.calib_progress.set("GEOMETRY COMPLETE")
         self.calib_index = -1
         self.proj.black()
 
