@@ -15,4 +15,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements-dev.txt
-      - run: pytest -q
+      - name: Compile Python sources
+        run: python -m compileall -q app tests
+      - name: Import critical modules
+        run: python -c "from app.calibration.engine import LiveCalibrator; from app.rendering.compositor import build_projection_mask; from app.visuals.engine import VisualEngine; from app.ui.experience_field import install; print('critical imports OK')"
+      - name: Test suite
+        run: pytest -q
