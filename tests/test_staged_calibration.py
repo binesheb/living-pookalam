@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from app.calibration.staged import _detect_projector_rectangle, _white_model, _order_quad
+from app.calibration.staged import _detect_black_dot, _detect_projector_rectangle, _white_model, _order_quad
 
 
 def test_white_frame_detects_projector_rectangle():
@@ -39,3 +39,18 @@ def test_white_model_builds_camera_response():
     assert len(model["observed_white_bgr"]) == 3
     assert len(model["white_balance_gains_bgr"]) == 3
     assert model["brightness"] > 0
+
+
+def test_black_dot_detects_dark_circle_on_white_field():
+    frame = np.full((480, 640, 3), 245, dtype=np.uint8)
+    cv2.circle(frame, (350, 150), 34, (12, 12, 12), -1)
+    point = _detect_black_dot(frame, (350, 150), 90)
+    assert point is not None
+    assert np.linalg.norm(np.array(point) - np.array([350, 150])) < 3.0
+
+
+def test_black_dot_ignores_dark_area_far_from_expected_location():
+    frame = np.full((480, 640, 3), 245, dtype=np.uint8)
+    cv2.circle(frame, (100, 100), 40, (10, 10, 10), -1)
+    point = _detect_black_dot(frame, (500, 350), 70)
+    assert point is None
