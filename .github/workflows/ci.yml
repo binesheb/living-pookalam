@@ -17,7 +17,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - name: Compile Python sources
         run: python -m compileall -q app tests
-      - name: Import critical modules
-        run: python -c "from app.calibration.engine import LiveCalibrator; from app.rendering.compositor import build_projection_mask; from app.visuals.engine import VisualEngine; from app.ui.experience_field import install; print('critical imports OK')"
+      - name: Import production modules
+        run: python -c "from app.calibration.engine import LiveCalibrator; from app.rendering.compositor import build_projection_mask; from app.visuals.engine import VisualEngine; from app.ui.field_product import ProductFieldConsole; from app.ui.masked_projection import MaskedProjectionWindow; print('production imports OK')"
       - name: Test suite
         run: pytest -q
