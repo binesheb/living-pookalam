@@ -61,22 +61,41 @@ def _target(self, index):
 
 
 def _detect_projector_rectangle(frame: np.ndarray, baseline: Optional[np.ndarray]):
-    """Return a camera-space quadrilateral for the illuminated projector area."""
+    """Return a camera-space quadrilateral for the illuminated projector area.
+
+    A percentile over the whole image can equal the projector's peak value when
+    the white frame is saturated or nearly binary. That makes ``THRESH_BINARY``
+    discard the projector rectangle. Threshold from positive response pixels and
+    cap the threshold below the measured peak instead.
+    """
+    if frame is None or frame.size == 0:
+        return None
+
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     if baseline is not None and baseline.shape == frame.shape:
         base = cv2.cvtColor(baseline, cv2.COLOR_BGR2GRAY)
         score = cv2.GaussianBlur(cv2.absdiff(gray, base), (0, 0), 5)
     else:
         score = cv2.GaussianBlur(gray, (0, 0), 5)
-    # Keep the bright/changed projection area, not isolated floor highlights.
-    threshold = max(22, int(np.percentile(score, 88)))
+
+    score = np.asarray(score, dtype=np.uint8)
+    peak = int(score.max())
+    if peak <= 4:
+        return None
+
+    positive = score[score > 4]
+    percentile_threshold = float(np.percentile(positive, 65)) if positive.size else float(peak)
+    threshold = int(np.clip(min(percentile_threshold, peak * 0.65), 8, 245))
     mask = cv2.threshold(score, threshold, 255, cv2.THRESH_BINARY)[1]
+
     kernel = np.ones((15, 15), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
+
     h, w = gray.shape
     candidates = []
     for c in contours:
@@ -85,15 +104,19 @@ def _detect_projector_rectangle(frame: np.ndarray, baseline: Optional[np.ndarray
             continue
         peri = cv2.arcLength(c, True)
         poly = cv2.approxPolyDP(c, 0.025 * peri, True)
+        if len(poly) < 4:
+            hull = cv2.convexHull(c)
+            poly = cv2.approxPolyDP(hull, 0.04 * cv2.arcLength(hull, True), True)
         candidates.append((area, poly.reshape(-1, 2).astype(np.float32)))
+
     if not candidates:
         return None
+
     _, pts = max(candidates, key=lambda item: item[0])
     if len(pts) < 4:
         return None
     rect = cv2.minAreaRect(pts.reshape(-1, 1, 2))
-    box = cv2.boxPoints(rect).astype(np.float32)
-    return _order_quad(box)
+    return _order_quad(cv2.boxPoints(rect).astype(np.float32))
 
 
 def _order_quad(pts):
@@ -106,9 +129,7 @@ def _order_quad(pts):
 def _white_model(frame, quad):
     mask = np.zeros(frame.shape[:2], np.uint8)
     cv2.fillConvexPoly(mask, quad.astype(np.int32), 255)
-    # Avoid edges where the projector rectangle and floor mix.
-    kernel = np.ones((31, 31), np.uint8)
-    mask = cv2.erode(mask, kernel)
+    mask = cv2.erode(mask, np.ones((31, 31), np.uint8))
     pixels = frame[mask > 0].astype(np.float32)
     if len(pixels) < 500:
         return None
@@ -143,7 +164,6 @@ def _colour_sample(frame, expected_bgr, expected_xy, radius):
     dist = np.linalg.norm(lab - target, axis=2)
     sat = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)[:, :, 1].astype(np.float32)
     score = dist - 0.18 * sat
-    # Use the best 5% of pixels, then return a robust median colour.
     limit = np.percentile(score, 5)
     pixels = roi[score <= limit]
     if len(pixels) < 20:
@@ -164,7 +184,7 @@ def _install():
         self.open_projector()
         self.stop_show()
         self.open_projector()
-        self.calib_index = -2  # -2=white/surface stage, -1=finished
+        self.calib_index = -2
         self.calib_history = []
         self.calib_points = []
         self.calib_color_samples = []
@@ -181,28 +201,23 @@ def _install():
         self.calib_error.set("Reprojection error: PENDING")
 
     def detect_target(self, frame, index):
-        if not getattr(self, "projection_quad", None) is None and self.H is not None:
-            # Predict the projector corner in camera space using the inverse map.
-            proj_margin = 0.12
-            p = np.float32([[self.proj.w*proj_margin, self.proj.h*proj_margin],
-                            [self.proj.w*(1-proj_margin), self.proj.h*proj_margin],
-                            [self.proj.w*(1-proj_margin), self.proj.h*(1-proj_margin)],
-                            [self.proj.w*proj_margin, self.proj.h*(1-proj_margin)]])[index]
-            inv = np.linalg.inv(self.H)
-            cp = cv2.perspectiveTransform(p.reshape(1,1,2), inv).reshape(2)
+        if getattr(self, "projection_quad", None) is not None and self.H is not None:
+            margin = 0.12
+            p = np.float32([[self.proj.w*margin, self.proj.h*margin],
+                            [self.proj.w*(1-margin), self.proj.h*margin],
+                            [self.proj.w*(1-margin), self.proj.h*(1-margin)],
+                            [self.proj.w*margin, self.proj.h*(1-margin)]])[index]
+            cp = cv2.perspectiveTransform(p.reshape(1, 1, 2), np.linalg.inv(self.H)).reshape(2)
             expected = self.proj.TARGETS[index][1]
-            # Broad local colour search; white-balance first if available.
             sample_frame = frame
             wb = self.state.get("colour_profile", {}).get("white_balance_gains_bgr")
             if wb:
                 sample_frame = _apply_white_balance(frame, wb)
             rgb = tuple(int(expected.lstrip("#")[i:i+2], 16) for i in (0,2,4))
-            expected_bgr = np.array(rgb[::-1], np.uint8)
-            result = _colour_sample(sample_frame, expected_bgr, cp, max(80, int(min(frame.shape[:2])*0.18)))
+            result = _colour_sample(sample_frame, np.array(rgb[::-1], np.uint8), cp,
+                                    max(80, int(min(frame.shape[:2]) * 0.18)))
             if result:
-                xy, observed = result
-                return xy
-        # Fallback to the existing HSV detector for profiles without a rectangle yet.
+                return result[0]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         ranges = [(130,179), (70,120), (15,45), (35,95)]
         lo, hi = ranges[index]
@@ -232,10 +247,8 @@ def _install():
                 self.calib_detail.set("WHITE • rectangle found; measuring surface response…")
                 return
             self.state["colour_profile"] = model
-            # White rectangle establishes the initial camera→projector plane.
-            cam = quad
             proj_pts = np.float32([(0,0),(self.proj.w,0),(self.proj.w,self.proj.h),(0,self.proj.h)])
-            H, _ = cv2.findHomography(cam, proj_pts, 0)
+            H, _ = cv2.findHomography(quad, proj_pts, 0)
             if H is None:
                 self.calib_detail.set("WHITE • rectangle found but geometry transform failed")
                 return
@@ -273,7 +286,6 @@ def _install():
         if spread > 12:
             return
         idx = self.calib_index
-        # Measure the colour after the centre is stable.
         expected = self.proj.TARGETS[idx][1]
         rgb = tuple(int(expected.lstrip("#")[i:i+2], 16) for i in (0,2,4))
         frame = self.frame
@@ -296,7 +308,6 @@ def _install():
             self.calib_labels[self.calib_index][0].set(f"{self.calib_index+1}   {self.proj.TARGETS[self.calib_index][0]}   ACTIVE")
             self.calib_labels[self.calib_index][1].configure(fg="#8b35ff")
             return
-        # Four colour observations now define the actual camera colour response.
         self.state["colour_profile"]["targets"] = self.calib_color_samples
         self.state["calibration_stage"] = "REPROJECTION"
         self.state["homography"] = self.H.tolist()
