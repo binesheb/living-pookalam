@@ -13,6 +13,7 @@ import tkinter as tk
 
 import cv2
 import numpy as np
+from PIL import Image, ImageTk
 
 from app.calibration.staged import _detect_projector_rectangle
 
@@ -277,11 +278,46 @@ def _calibration_tick(self):
     self.proj.black()
 
 
+def _tick(self):
+    """FieldConsole tick with support for the white-field (-2) stage."""
+    ok, frame = self.cap.read()
+    if ok:
+        self.frame = frame
+        from app.ui.field_ui import segment_pookalam
+        _, self.contour, self.confidence = segment_pookalam(frame)
+        if self.page == "home" and hasattr(self, "preview"):
+            self.set_preview(frame)
+        elif self.page == "detect" and hasattr(self, "detect_preview"):
+            debug = frame.copy()
+            if self.contour is not None:
+                cv2.drawContours(debug, [self.contour], -1, (190, 134, 255), 4)
+            img = cv2.cvtColor(cv2.resize(debug, (900, 506)), cv2.COLOR_BGR2RGB)
+            self.detect_photo = ImageTk.PhotoImage(Image.fromarray(img))
+            self.detect_preview.configure(image=self.detect_photo)
+        elif self.page == "calibrate" and hasattr(self, "calib_preview"):
+            debug = frame.copy()
+            if self.calib_index >= 0:
+                p = self.detect_target(frame, self.calib_index)
+                if p:
+                    cv2.circle(debug, (int(p[0]), int(p[1])), 24, (0, 255, 0), 3)
+            elif self.calib_index == -2 and getattr(self, "projection_quad", None) is not None:
+                cv2.polylines(debug, [np.int32(self.projection_quad)], True, (0, 255, 255), 3)
+            img = cv2.cvtColor(cv2.resize(debug, (900, 506)), cv2.COLOR_BGR2RGB)
+            self.calib_photo = ImageTk.PhotoImage(Image.fromarray(img))
+            self.calib_preview.configure(image=self.calib_photo)
+        if self.calib_index != -1:
+            self.calibration_tick()
+        if self.showing and self.proj:
+            self.proj.render(self.interaction, self.contour)
+    self.root.after(33, self.tick)
+
+
 def _install_class(cls):
     cls.page_calibrate = _page_calibrate
     cls.start_calibration = _start_calibration
     cls.detect_target = _detect_target
     cls.calibration_tick = _calibration_tick
+    cls.tick = _tick
 
 
 def _install():
