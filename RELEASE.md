@@ -1,58 +1,101 @@
-# LIVE POOKALAM 1.0.0-rc3
+# LIVE POOKALAM 1.1.0-rc1
 
-## Release status
+## High Quality 1080p Effects Release
 
-**Field Release Candidate 3** — Windows 11.
+**Target:** Windows 11 + 1920x1080 projector.
 
-This release consolidates automated calibration, pattern analysis, Pookalam-only projection masking, Living Effects and the approved operator workflow. RC3 additionally makes the **actual production launcher** use the robust four-target calibration state machine; the demo/legacy calibration path is no longer the release path.
+This release makes the new high-quality visual engine the production renderer and expands the effect system for a polished Onam showroom experience.
 
-## Release gates
+## New visual capabilities
 
-### Software
+### Edge FX
+- Neon Edge
+- Moving Edge Trace
+- Electric Edge
+- Edge Particles
+- Edge Draw
+- Edge Pulse
+- Edge Spark
+- Liquid Edge
 
-- [x] Automated four-target calibration
-- [x] One active colour target at a time
-- [x] Stable-frame target locking
-- [x] Reprojection-error validation
-- [x] Failed recalibration leaves the previous valid map untouched
-- [x] Calibration can be rerun after projector/webcam movement
-- [x] Digital Pookalam source is alpha-masked to detected geometry
-- [x] Physical/hybrid effects are rendered only through the projector-space mask
-- [x] Projector-resolution scaling after calibration
-- [x] Developer edge overlay is available
-- [x] Pattern analysis and effect library are integrated
-- [x] Regression tests for calibration, segmentation, pattern analysis, effects and compositor
-- [x] Production UI import gate in CI
-- [x] Python compile gate in CI
-- [x] Windows launcher/update workflow retained
-- [x] Production projector path reviewed separately from preview/demo path
+### Radial / Mandala
+- Radial Wave
+- Ring Pulse
+- Spiral
+- Light Rays
+- Mandala Spin
+- Colour Wave
 
-### Hardware acceptance still required
+### Flower
+- Flower Bloom
+- Lotus Bloom
+- Petal Drift
+- Petal Flow
+- Petal Shimmer
+- Petal Burst
 
-The RC is **not** declared a final production release until it passes on the actual Windows 11 installation PC with the real projector and webcam.
+### Particles
+- Fireflies
+- Golden Dust
+- Sparkle
+- Starfield
+- Golden Rain
 
-Required field tests:
+### Festival / Onam
+- Golden Shimmer
+- Deepam Glow
+- Flower Shower
+- Onam Aurora
+- Heartbeat
+- Centre Beacon
 
-1. Projector and webcam placed on the same side of the Pookalam.
-2. Automated calibration completes without manual point selection.
-3. Projector moved, calibration rerun, and mapping verified.
-4. Physical Pookalam detected without wallpaper/background becoming the contour.
-5. Developer Mode edge overlay lands on the real flower boundary.
-6. Effects remain inside the Pookalam and do not expose a rectangular projection area.
-7. Digital Pookalam image projects only inside its detected mask.
-8. Run Show starts/stops cleanly.
-9. Camera disconnect/reconnect does not crash the operator UI.
-10. Projector disconnect/reconnect does not corrupt the saved calibration.
+### Interaction
+- Touch Burst
+- Touch Trail
+- Interaction Ripple
+- Interaction Sparks
+- Water Ripple
+- Energy Ring
+- Shockwave
 
-## Operator release procedure
+### Presets
+- ONAM GOLD
+- LIVING FLOWER
+- MAGIC TOUCH
+- REVEAL
+- MAHABALI GLOW
+- TEMPLE LIGHT
+- FLOWER SHOWER
+- MAGIC MANDALA
+- WATER MAGIC
 
-```powershell
-git pull
-.\.venv\Scripts\python.exe -m app.ui
-```
+## 1080p rendering policy
 
-Or use the application's **UPDATE & RESTART** action when available.
+The production target is **1920x1080**. Effects are deliberately bounded in object count so the Tk projector surface remains responsive on normal Windows installation hardware.
 
-## Rollback
+The visual engine remains independent of Tkinter and is consumed through the existing draw adapter. This keeps the compositor replaceable later with a GPU renderer without changing calibration or pattern-analysis APIs.
 
-If a new build fails hardware acceptance, use the last known-good Git commit. Never delete the saved installation profile while troubleshooting; the previous calibration is intentionally preserved across failed recalibration attempts.
+## Safety / projection rules
+
+- Pookalam-only projection masking remains mandatory.
+- Effects outside the approved contour are rejected by the projection mask.
+- Failed calibration never overwrites the previous valid calibration.
+- Developer edge overlays remain disabled when Developer Mode is disabled.
+- A black projector surface is used whenever a valid projection geometry is unavailable.
+
+## Hardware acceptance
+
+Final production certification still requires the actual Windows 11 PC, webcam and 1920x1080 projector.
+
+Required tests:
+
+1. Four-target calibration.
+2. Side-mounted camera/projector geometry.
+3. Recalibration after hardware movement.
+4. Physical flower detection.
+5. Digital Pookalam masking.
+6. Every preset at 1080p.
+7. Edge effects at 1080p.
+8. Interaction effects.
+9. 30-minute continuous Run Show stability test.
+10. Camera/projector disconnect recovery.
