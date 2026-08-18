@@ -1,14 +1,14 @@
 """Final-day readiness and safe-start rules."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .product_pipeline import OutputSpec, PipelineHealth, SystemMode
 
 
 @dataclass
 class FinalDayController:
-    output: OutputSpec = OutputSpec()
+    output: OutputSpec = field(default_factory=OutputSpec)
     mode: SystemMode = SystemMode.SETUP
 
     def can_run_show(self, health: PipelineHealth) -> bool:
