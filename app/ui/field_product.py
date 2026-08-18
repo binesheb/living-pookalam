@@ -11,7 +11,7 @@ from app.ui.masked_projection import MaskedProjectionWindow
 
 
 class ProductFieldConsole(FieldExperienceConsole):
-    """Approved UI plus production calibration and projection paths."""
+    """Approved production calibration and projection paths."""
 
     def __init__(self, root):
         self.calibrator = None
@@ -64,7 +64,6 @@ class ProductFieldConsole(FieldExperienceConsole):
         self.calibrator.accept_observation(observation)
         self.calib_history = self.calibrator.candidate_history
         target = self.calibrator.active_target()
-
         locked = len(self.calibrator.observations)
         self.calib_progress.set(f"{locked} / 4")
         self.calib_detail.set(
@@ -89,7 +88,6 @@ class ProductFieldConsole(FieldExperienceConsole):
 
         result = self.calibrator.build_result()
         if result is None or result.reprojection_error > 12.0:
-            # Do not overwrite the previously valid map.
             self.calib_index = -1
             self.calib_status.set("CALIBRATION REJECTED")
             error = "unavailable" if result is None else f"{result.reprojection_error:.1f}px"
@@ -123,5 +121,7 @@ class ProductFieldConsole(FieldExperienceConsole):
 
 def launch():
     root = tk.Tk()
-    ProductFieldConsole(root)
+    # Import late to avoid a circular dependency during module discovery.
+    from app.ui.premium_shell import PremiumProductFieldConsole
+    PremiumProductFieldConsole(root)
     root.mainloop()
