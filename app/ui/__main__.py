@@ -36,10 +36,11 @@ def launch() -> None:
 
     def load_application() -> None:
         try:
-            # Install the staged physical calibration workflow before the product
-            # console subclass is imported.  The white-surface baseline therefore
-            # becomes the first real calibration stage on every rerun.
+            # Calibration layers are installed in order.  The white-field +
+            # black-dot stage deliberately runs after the legacy staged module
+            # so its target renderer/detector become the active field workflow.
             __import__("app.calibration.staged")
+            __import__("app.calibration.black_dot_stage")
             result["console"] = __import__("app.ui.field_product", fromlist=["ProductFieldConsole"]).ProductFieldConsole
         except Exception:
             result["error"] = traceback.format_exc()
