@@ -32,6 +32,15 @@ class MaskedProjectionWindow(ProjectionWindow):
             H = self.app.H if source in ("physical", "hybrid") else None
             mapped = map_contour_to_projector(raw, source_shape, (self.w, self.h), H)
 
+        # A calibration homography is stored in the projector resolution that
+        # existed when calibration was accepted. Scale it if Windows reports a
+        # different projector mode later.
+        if H is not None and mapped is not None:
+            pw = max(1, int(self.app.state.get("projector_width", self.w)))
+            ph = max(1, int(self.app.state.get("projector_height", self.h)))
+            mapped[:, 0] *= self.w / pw
+            mapped[:, 1] *= self.h / ph
+
         mask = build_projection_mask(mapped, (self.w, self.h), edge_margin=8)
         if mask is None:
             return
@@ -41,6 +50,10 @@ class MaskedProjectionWindow(ProjectionWindow):
             center = np.asarray(pattern.centre, dtype=np.float32).reshape(1, 1, 2)
             if H is not None:
                 center = cv2.perspectiveTransform(center, np.asarray(H, dtype=np.float32)).reshape(2)
+                pw = max(1, int(self.app.state.get("projector_width", self.w)))
+                ph = max(1, int(self.app.state.get("projector_height", self.h)))
+                center[0] *= self.w / pw
+                center[1] *= self.h / ph
             else:
                 center = np.mean(mapped, axis=0)
             radius = float(np.max(np.linalg.norm(mapped - center.reshape(1, 2), axis=1)))
