@@ -1,34 +1,31 @@
 # LIVE POOKALAM
 
-**Interactive Projection Experience for Onam**
-
+**Interactive Projection Experience for Onam**  
 **developed by bnsh.eb**
 
-Living Pookalam is a reusable Windows 11 platform that turns a physical Pookalam, a digital Pookalam, or both into an interactive projection experience. It is designed to be installed repeatedly across showrooms without changing the application core.
+Live Pookalam is a reusable Windows 11 platform that turns a physical Pookalam, a digital Pookalam, or both into an interactive projection canvas. It is designed to be installed repeatedly across showrooms without changing the application core.
 
-## Design philosophy
-
-The operator should not need to understand computer vision, homography, rendering or Python.
-
-The application therefore follows a guided workflow:
+## Operator workflow
 
 ```text
 HOME
   ↓
 SOURCE
   ↓
-CALIBRATE (when installation is ready)
+CALIBRATE
   ↓
-DETECT / LOCK POOKALAM
+ANALYSE
   ↓
-EXPERIENCE
+DETECT
+  ↓
+EFFECTS
   ↓
 RUN SHOW
 ```
 
-Calibration is deliberately optional during development. The visual experience can be tested on a projector before the physical installation is ready.
+**Developer Mode** exposes the real camera segmentation/edge geometry on the projector. Calibration can be rerun at any time when the camera or projector moves.
 
-## Windows 11 test
+## Windows 11
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -36,120 +33,140 @@ pip install -r requirements.txt
 python -m app.ui
 ```
 
-Or use `run_windows.bat`.
+Or launch `run_windows.bat`.
 
-## Modes
+## Sources
 
 ### Digital
-Upload a Pookalam image and use it as the base visual surface. This is the fastest way to develop and test effects without a physical flower arrangement.
+Upload a Pookalam image. The pattern analyzer extracts a usable boundary, centre, radial rings, dominant colours, edges and symmetry so effects can be previewed without a physical installation.
 
 ### Physical
-The webcam observes the real floor Pookalam. The vision layer detects its usable contour and derives geometry for interaction and effects.
+The webcam observes the real flower Pookalam. The deterministic vision layer derives a contour/mask and geometry from the live feed.
 
 ### Hybrid
-The real flower Pookalam remains visible while projected light, particles, glows, waves and other effects are layered over it.
+The physical flowers remain visible while the projector adds effects over the real geometry.
 
-## Calibration model
+## Calibration
 
-The first hardware implementation uses a planar camera → projector homography.
+Calibration is an automated, repeatable camera → projector mapping sequence. Only the currently projected, uniquely coloured target is valid, reducing false locks from wallpaper or room content. A new mapping is accepted only after stable observations and validation; the previous mapping remains available until a valid replacement exists.
 
-1. Extend Windows to the projector.
-2. Start Live Pookalam.
-3. Open **CALIBRATE**.
-4. The projector displays four targets.
-5. The webcam detects their camera coordinates.
-6. The application computes the homography.
-7. The installation mapping is saved locally.
+Move the projector or webcam? Press **CALIBRATE** and run the sequence again. No application restart is required.
 
-Because both devices observe the same floor plane, the camera can be mounted at an angle. Future production calibration will add stronger marker detection, lens correction, confidence/error reporting and manual adjustment.
+## Pattern analysis
 
-## Pookalam perception
+The `Analyse` stage produces a deterministic `PatternAnalysis` model containing:
 
-The Pookalam is represented as a contour/mask rather than assuming a perfect circle. This is important when the webcam is placed to the side and the Pookalam appears as an ellipse or perspective-distorted shape.
+- boundary/contour
+- edge map
+- centre
+- radius
+- concentric ring geometry
+- dominant colours
+- approximate radial symmetry order
+- confidence
 
-Planned perception layers include:
+The analyzer intentionally does not require semantic AI recognition of every flower. Geometry remains reliable even when flower-level classification is uncertain.
 
-- floor rectification
-- colour/chroma segmentation
-- boundary and contour locking
-- centre/radial geometry
-- ring/region analysis
-- symmetry analysis
-- feature/motif detection
-- person tracking
-- multiple-person interaction
-- optional AI semantic recognition
+## Living Effects
 
-## Experience engine
+The effect engine is data-driven and pattern-aware. It is designed around the interaction model of modern editors such as VN/CapCut while remaining specific to Pookalam projection.
 
-The renderer is built from independent effect layers so an operator can compose an experience without changing code.
+### Edge FX
 
-Current layers include:
+- Neon Edge
+- Moving Edge Trace
+- Electric Edge
+- Edge Particles
+- Edge Draw
+- Edge Pulse
+- Liquid Edge
 
-- base Pookalam
-- breathing glow
-- radial waves
-- petal flow
-- fireflies
-- lotus bloom
-- interaction ripple
-- interaction sparks
-- spiral light
-- colour pulse
+### Radial
 
-The architecture is intentionally open for future Onam scenes, Mahabali sequences, butterflies, lamps, flower motion, water/light waves, audio-reactive effects, timelines and scripted scenes.
+- Radial Wave
+- Ring Pulse
+- Spiral
+- Light Rays
 
-## Operator workflow
+### Flower / Particles
 
-### HOME
-Hardware health, showroom profile, calibration state and quick-start actions.
+- Flower Bloom
+- Petal Drift
+- Petal Shimmer
+- Fireflies
+- Golden Dust
+- Sparkle
 
-### SOURCE
-Choose Digital, Physical or Hybrid.
+### Light / Festival
 
-### CALIBRATE
-Projector/camera mapping. Can be skipped during early development.
+- Soft Glow
+- Light Sweep
+- Golden Shimmer
+- Deepam Glow
+- Flower Shower
 
-### DETECT
-Find and lock the actual Pookalam. Detection is assisted; the contour is the primary geometry.
+### Liquid / Energy
 
-### EXPERIENCE
-Enable/disable individual effect layers.
+- Water Ripple
+- Energy Ring
+- Shockwave
 
-### RUN SHOW
-Safe show control. `ESC` stops the experience.
+### Interaction
+
+- Touch Burst
+- Touch Trail
+- Region React
+
+### Transitions
+
+- Pattern Reveal
+- Particle Dissolve
+
+Presets currently include **ONAM GOLD**, **LIVING FLOWER**, **MAGIC TOUCH** and **REVEAL**.
+
+Every effect is a layer. Parameters such as intensity and speed can be changed without changing the underlying calibration or vision model.
+
+## Developer Mode
+
+Developer Mode is intended for installation and experimentation. It can show:
+
+- live camera feed
+- detected Pookalam contour
+- centre/geometry
+- calibration diagnostics
+- projected real edge
+- effect previews
+
+The interaction behavior is intentionally not hard-coded to a single gesture. This allows the final Onam interaction design to be decided after real-world tracking tests.
 
 ## Showroom replication
 
-One core application is deployed everywhere.
+One application core is shared across all installations. Hardware and content belong in installation profiles:
 
 ```text
 app/                       shared application logic
 profiles/template/         reference installation
-profiles/showrooms/<id>/  showroom-specific hardware/calibration/content
+profiles/showrooms/<id>/  showroom-specific calibration/content
 ```
 
-A new showroom should never require a code fork. Camera index, projector display, physical dimensions, calibration, zones and local content belong in the showroom profile.
+A showroom should not require a code fork.
 
 ## Production roadmap
 
-- robust ArUco calibration
-- camera lens correction
+- robust marker calibration and lens correction
 - floor-plane rectification
-- editable Pookalam mask
-- Pookalam feature/region map
-- GPU renderer
-- multi-person tracking
+- editable Pookalam region masks
+- flower/motif semantic recognition
+- GPU compositor for high-resolution projection
 - hand/gesture tracking
+- multiple-person interaction
 - scene/timeline editor
-- audio-reactive experience
+- audio-reactive effects
 - Onam/Mahabali scene library
 - packaged Windows EXE
-- automatic startup/recovery
-- watchdog and failsafe
+- watchdog and recovery
 - showroom profile editor
-- installation diagnostics
-- remote deployment/update support
+- remote update/deployment
 
 ## Project identity
 
