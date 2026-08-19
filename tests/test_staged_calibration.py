@@ -1,10 +1,10 @@
 import cv2
 import numpy as np
 
+from app.calibration.quality import homography_reprojection_error
 from app.calibration.staged import (
     _detect_black_dot,
     _detect_projector_rectangle,
-    _homography_reprojection_error,
     _white_model,
     _order_quad,
 )
@@ -65,7 +65,7 @@ def test_black_dot_ignores_dark_area_far_from_expected_location():
 def test_homography_reprojection_error_is_low_for_consistent_points():
     observed = np.float32([[100, 100], [540, 110], [530, 390], [90, 380]])
     expected = np.float32([[0, 0], [1920, 0], [1920, 1080], [0, 1080]])
-    error = _homography_reprojection_error(observed, expected)
+    error = homography_reprojection_error(observed, expected)
     assert error < 0.01
 
 
@@ -74,5 +74,5 @@ def test_homography_reprojection_error_detects_bad_point():
     expected = np.float32([[0, 0], [1920, 0], [1920, 1080], [0, 1080]])
     noisy = observed.copy()
     noisy[2] += np.array([30, -25], np.float32)
-    error = _homography_reprojection_error(noisy, expected)
+    error = homography_reprojection_error(noisy, expected)
     assert error > 1.0
