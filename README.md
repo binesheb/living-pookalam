@@ -2,9 +2,25 @@
 
 **Interactive Projection Experience for Onam**  
 **developed by bnsh.eb**  
-**Field Release Candidate: 1.0.0-rc3**
+**Field Release Candidate: 1.1.0-rc1**
 
 Live Pookalam is a reusable Windows 11 platform that turns a physical Pookalam, a digital Pookalam, or both into an interactive projection canvas. It is designed to be installed repeatedly across showrooms without changing the application core.
+
+## Quick start
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m app.ui
+```
+
+Or launch `run_windows.bat`. The launcher refreshes Python dependencies on every start without recreating the existing virtual environment.
+
+## Updating
+
+For a safe manual update, run `tools\update_windows.bat` from a normal Git clone. It refuses to overwrite uncommitted local changes, performs a fast-forward-only update from `origin/main`, and then refreshes the Python dependencies. Keep each installation as a Git clone so GitHub remains the source of truth.
+
+Automatic deployment should be handled by the installation/remote deployment layer after field validation; this project should not silently replace a running projection application during a show.
 
 ## Operator workflow
 
@@ -25,16 +41,6 @@ RUN SHOW
 ```
 
 **Developer Mode** exposes the real camera segmentation/edge geometry on the projector. Calibration can be rerun at any time when the camera or projector moves.
-
-## Windows 11
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m app.ui
-```
-
-Or launch `run_windows.bat`.
 
 ## Sources
 
