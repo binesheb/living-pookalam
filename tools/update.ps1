@@ -10,12 +10,17 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw 'Git is required to update LIVE POOKALAM.'
 }
 
+$branch = (git branch --show-current).Trim()
+if ($branch -ne 'main') {
+    throw "Safe updates only run from the main branch. Current branch: $branch"
+}
+
 $status = git status --porcelain
 if ($status) {
     throw 'Local changes detected. Commit or stash them before updating.'
 }
 
-git fetch origin main
+git fetch --prune origin main
 $local = (git rev-parse HEAD).Trim()
 $remote = (git rev-parse origin/main).Trim()
 
