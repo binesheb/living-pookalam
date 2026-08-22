@@ -18,18 +18,27 @@ class FloorProjectorDrawAdapter:
         return [(float(x), float(y)) for x, y in mapped]
 
     def circle(self, x, y, r, fill, width=0):
-        edge = self._map([(x-r, y), (x+r, y), (x, y-r), (x, y+r)])
-        left, right, top, bottom = edge
-        self.canvas.create_oval(left[0], top[1], right[0], bottom[1],
-                                fill=fill if width == 0 else "", outline=fill,
-                                width=max(1, width))
+        angles = np.linspace(0.0, np.pi * 2.0, 65, dtype=np.float32)[:-1]
+        points = [(x + r * float(np.cos(a)), y + r * float(np.sin(a))) for a in angles]
+        mapped = self._map(points)
+        flat = [v for p in mapped for v in p]
+        if width == 0:
+            self.canvas.create_polygon(*flat, fill=fill, outline=fill)
+        else:
+            self.canvas.create_line(*flat, flat[0], flat[1], fill=fill, width=max(1, width), smooth=True)
 
     def ellipse(self, rect, fill, width=0):
-        x0, y0, x1, y1 = rect
-        mapped = self._map([(x0, y0), (x1, y1)])
-        self.canvas.create_oval(mapped[0][0], mapped[0][1], mapped[1][0], mapped[1][1],
-                                fill=fill if width == 0 else "", outline=fill,
-                                width=max(1, width))
+        x0, y0, x1, y1 = map(float, rect)
+        cx, cy = (x0 + x1) * 0.5, (y0 + y1) * 0.5
+        rx, ry = abs(x1 - x0) * 0.5, abs(y1 - y0) * 0.5
+        angles = np.linspace(0.0, np.pi * 2.0, 65, dtype=np.float32)[:-1]
+        points = [(cx + rx * float(np.cos(a)), cy + ry * float(np.sin(a))) for a in angles]
+        mapped = self._map(points)
+        flat = [v for p in mapped for v in p]
+        if width == 0:
+            self.canvas.create_polygon(*flat, fill=fill, outline=fill)
+        else:
+            self.canvas.create_line(*flat, flat[0], flat[1], fill=fill, width=max(1, width), smooth=True)
 
     def line(self, points, fill, width=1):
         mapped = self._map(points)
