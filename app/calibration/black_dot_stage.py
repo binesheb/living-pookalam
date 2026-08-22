@@ -6,7 +6,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 from app.calibration.staged import _detect_projector_rectangle
-from app.calibration.floor_space import build_floor_calibration, transform
+from app.calibration.floor_space import build_floor_calibration
+from app.rendering.floor_adapter import FloorProjectorDrawAdapter
 
 MARGIN = 0.12
 DOT_RADIUS_FRACTION = 0.065
@@ -164,6 +165,29 @@ def _calibration_tick(self):
     self.calib_index=-1; self.proj.black()
 
 
+def _render(self, interaction=None, contour=None):
+    self.clear()
+    floor_h = self.app.state.get("floor_to_projector_homography")
+    floor_w = float(self.app.state.get("floor_width_mm", 0) or 0)
+    floor_height = float(self.app.state.get("floor_height_mm", 0) or 0)
+    if floor_h is not None and floor_w > 0 and floor_height > 0:
+        adapter = FloorProjectorDrawAdapter(self.canvas, np.asarray(floor_h, dtype=np.float32))
+        self.app.engine.render(adapter, int(round(floor_w)), int(round(floor_height)), interaction=interaction)
+    else:
+        self.app.engine.render(DrawAdapter(self.canvas), self.w, self.h, interaction=interaction)
+    if self.app.dev_mode and contour is not None:
+        pts = contour.reshape(-1, 2).astype(np.float32)
+        if self.app.H is not None:
+            mapped = cv2.perspectiveTransform(pts.reshape(-1, 1, 2), self.app.H).reshape(-1, 2)
+        else:
+            ch, cw = self.app.frame.shape[:2]
+            mapped = pts.copy(); mapped[:, 0] = mapped[:, 0] / max(1, cw) * self.w; mapped[:, 1] = mapped[:, 1] / max(1, ch) * self.h
+        mapped[:, 0] *= self.w / max(1, self.app.state.get("projector_width", self.w)); mapped[:, 1] *= self.h / max(1, self.app.state.get("projector_height", self.h))
+        poly = [(float(x), float(y)) for x, y in mapped]
+        if len(poly) >= 2: self.canvas.create_line(*[v for p in poly for v in p], fill="#8b35ff", width=5, smooth=True)
+        self.canvas.create_text(36, 32, text="DEV • REAL POOKALAM EDGE", anchor="nw", fill="#8b35ff", font=("Segoe UI", 18, "bold"))
+
+
 def _tick(self):
     ok,frame=self.cap.read()
     if ok:
@@ -192,7 +216,7 @@ def _install_class(cls):
 
 def _install():
     from app.ui.field_ui import FieldConsole,ProjectionWindow
-    ProjectionWindow.white=_white_field;ProjectionWindow.target=_black_dot;FieldConsole.tick=_tick;_install_class(FieldConsole)
+    ProjectionWindow.white=_white_field;ProjectionWindow.target=_black_dot;ProjectionWindow.render=_render;FieldConsole.tick=_tick;_install_class(FieldConsole)
     try:
         from app.ui.field_experience_console import FieldExperienceConsole
         _install_class(FieldExperienceConsole)
