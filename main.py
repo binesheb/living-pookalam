@@ -38,17 +38,58 @@ def choose_camera():
         if value.isdigit() and int(value) in found:return int(value)
         print('Choose one of:',found)
 
+def projector_screens():
+    screens=[]
+    try:
+        import ctypes
+        user32=ctypes.windll.user32
+        screens=list(range(max(1,user32.GetSystemMetrics(80))))
+    except Exception:
+        screens=[0]
+    return screens
+
+def choose_projector():
+    screens=projector_screens()
+    if len(screens)==1:
+        print('Only one display detected. Using display 0 for the white calibration screen.')
+        return 0
+    print('Detected displays:', ', '.join(map(str,screens)))
+    while True:
+        value=input('Projector display index: ').strip()
+        if value.isdigit() and int(value) in screens:return int(value)
+        print('Choose one of:',screens)
+
+def show_white_projector(display_index):
+    name='Living Pookalam - Projector Alignment'
+    cv2.namedWindow(name,cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(name,cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
+    # On Windows, OpenCV can move a fullscreen window to a secondary display.
+    try:
+        import ctypes
+        user32=ctypes.windll.user32
+        width=user32.GetSystemMetrics(0); height=user32.GetSystemMetrics(1)
+        if display_index>0:
+            cv2.moveWindow(name,width*(display_index),0)
+    except Exception:
+        pass
+    white=np.full((1080,1920,3),255,dtype=np.uint8)
+    cv2.imshow(name,white)
+    cv2.waitKey(100)
+    return name
+
 def order_and_validate(points):
     if len(points)!=4: raise ValueError('Exactly four points required')
     pts=np.array(points,dtype=np.float32)
-    # User clicks in TL, TR, BR, BL order; reject degenerate quadrilateral.
     area=cv2.contourArea(pts.reshape(-1,1,2))
     if abs(area)<100: raise ValueError('Selected area is too small')
     return pts
 
-def calibrate(camera_index):
+def calibrate(camera_index,projector_index):
+    projector_window=show_white_projector(projector_index)
     cap=cv2.VideoCapture(camera_index)
-    if not cap.isOpened(): raise RuntimeError('Cannot open selected webcam')
+    if not cap.isOpened():
+        cv2.destroyWindow(projector_window)
+        raise RuntimeError('Cannot open selected webcam')
     points=[]; drag=[None]
     names=['TOP-LEFT','TOP-RIGHT','BOTTOM-RIGHT','BOTTOM-LEFT']
     window='Living Pookalam - Floor Calibration'
@@ -69,7 +110,7 @@ def calibrate(camera_index):
             cv2.putText(frame,str(i+1),tuple(map(int,np.array(p)+[12,-12])),cv2.FONT_HERSHEY_SIMPLEX,.7,(255,255,255),2)
         if len(points)>1: cv2.polylines(frame,[np.array(points,np.int32)],len(points)==4,(0,255,0),2)
         step=names[len(points)] if len(points)<4 else 'DRAG TO ADJUST - S=SAVE, R=RESET, U=UNDO'
-        cv2.putText(frame,'Click: '+step,(20,35),cv2.FONT_HERSHEY_SIMPLEX,.75,(0,255,0),2)
+        cv2.putText(frame,'PROJECTOR WHITE SCREEN ON - Click: '+step,(20,35),cv2.FONT_HERSHEY_SIMPLEX,.65,(0,255,0),2)
         cv2.imshow(window,frame); key=cv2.waitKey(1)&0xFF
         if key==27: break
         if key in (ord('r'),ord('R')): points.clear()
@@ -77,12 +118,13 @@ def calibrate(camera_index):
         if key in (ord('s'),ord('S')) and len(points)==4:
             try:
                 pts=order_and_validate(points)
-                CONFIG.write_text(json.dumps({'version':VERSION,'camera_index':camera_index,'floor_points_camera':pts.tolist()},indent=2))
+                CONFIG.write_text(json.dumps({'version':VERSION,'camera_index':camera_index,'projector_display_index':projector_index,'floor_points_camera':pts.tolist()},indent=2))
                 print('Calibration saved to',CONFIG); break
             except ValueError as e: print(e)
-    cap.release(); cv2.destroyAllWindows()
+    cap.release(); cv2.destroyWindow(window); cv2.destroyWindow(projector_window); cv2.destroyAllWindows()
 
 def main():
     mandatory_update_check()
-    calibrate(choose_camera())
+    projector=choose_projector()
+    calibrate(choose_camera(),projector)
 if __name__=='__main__': main()
