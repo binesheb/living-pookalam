@@ -4,7 +4,7 @@ import main as app
 from effects import EffectsEngine
 from pookalam_vision import detect_pookalam
 from discovery_overlay import run as run_discovery
-app.VERSION='3.2.0'
+app.VERSION='3.2.2'
 _orig=app.build_projection
 def build_projection_optional(img,cfg):
  if img is None:
@@ -17,17 +17,20 @@ def toggle_debug_reliable(self):
  if not self.debug.is_set():app.debug_close();cv2.waitKey(1)
 app.App.toggle_debug=toggle_debug_reliable
 
-def interaction_with_effects(img,stop_event,debug_event):
+def interaction_with_effects(img,stop_event,debug_event,progress=None):
  if not app.CONFIG.exists():raise RuntimeError('Calibrate first')
  cfg=app.json.loads(app.CONFIG.read_text());_,_,pw,ph=app.projector_geometry();stable=app.build_projection(img,cfg);pname=app.projector_window('Living Pookalam - Projection',stable)
  cap=cv2.VideoCapture(cfg['camera_index']);field=np.float32(cfg['projector_field_camera']);floor=np.float32(cfg['floor_boundary_camera']);Hfield=cv2.getPerspectiveTransform(field,np.float32([[0,0],[pw,0],[pw,ph],[0,ph]]));Hfloor=cv2.getPerspectiveTransform(floor,np.float32([[0,0],[640,0],[640,640],[0,640]]));Hfloorproj=Hfield@np.linalg.inv(Hfloor)
+ if progress:progress('Learning stable scene — 10 seconds remaining')
  scene_base,floor_base=app.learn_baseline(cap,field,Hfloor,stop_event,debug=debug_event.is_set())
  if scene_base is None:cap.release();return
  if img is not None:artwork=cv2.resize(img,(640,640));vision={'mask':np.full((640,640),255,np.uint8),'center':(320,320),'radius':315,'confidence':1.0};source='UPLOADED DESIGN'
  else:vision=detect_pookalam(floor_base);artwork=vision['artwork'];source=f"PHYSICAL POOKALAM {vision['confidence']:.0%}"
- # Audience-facing discovery sequence uses the same calibrated projector window.
- run_discovery(pname,(pw,ph),vision,artwork,seconds=6,stop=stop_event)
+ def discovery_progress(step,total,remaining,label):
+  if progress:progress(f'{label} — phase {step+1}/{total} — {remaining:.1f}s remaining')
+ run_discovery(pname,(pw,ph),vision,artwork,seconds=6,stop=stop_event,on_progress=discovery_progress)
  if stop_event.is_set():cap.release();return
+ if progress:progress('Pookalam ready — interactive experience running')
  fx=EffectsEngine(pw,ph,artwork,Hfloorproj);fx.design_mask=vision['mask'];fx.cx,fx.cy=vision['center'];fx.radius=vision['radius'];kernel=np.ones((5,5),np.uint8);tick=time.perf_counter();frames=0;fps=0
  while not stop_event.is_set():
   ok,frame=cap.read()
@@ -48,9 +51,10 @@ app.interaction_loop=interaction_with_effects
 
 def project_optional(self):
  if self.worker and self.worker.is_alive():return
- self.stop.clear();img=None if self.image is None else cv2.cvtColor(np.array(self.image),cv2.COLOR_RGB2BGR);self.set_state('Learning scene, discovering Pookalam, then starting live experience',True)
+ self.stop.clear();img=None if self.image is None else cv2.cvtColor(np.array(self.image),cv2.COLOR_RGB2BGR);self.set_state('Preparing experience...',True)
+ def report(text):self.after(0,lambda:self.set_state(text,True))
  def work():
-  try:app.interaction_loop(img,self.stop,self.debug)
+  try:app.interaction_loop(img,self.stop,self.debug,report)
   except Exception as e:self.after(0,lambda:app.messagebox.showerror('Interactive Pookalam',str(e)))
   finally:self.after(0,lambda:self.set_state('Experience stopped'))
  self.worker=threading.Thread(target=work,daemon=True);self.worker.start()
