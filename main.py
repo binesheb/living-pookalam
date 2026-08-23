@@ -16,115 +16,103 @@ def mandatory_update_check():
             print(f'Update required: {VERSION} -> {remote}')
             subprocess.run(['git','pull','--ff-only'],cwd=ROOT,check=True)
             os.execv(sys.executable,[sys.executable,*sys.argv])
-    except Exception as exc:
-        print(f'Update check unavailable: {exc}')
+    except Exception as exc: print(f'Update check unavailable: {exc}')
 
 def cameras(limit=10):
     found=[]
     for i in range(limit):
         cap=cv2.VideoCapture(i)
-        if cap.isOpened():
-            ok,_=cap.read()
-            if ok: found.append(i)
+        if cap.isOpened() and cap.read()[0]: found.append(i)
         cap.release()
     return found
 
 def choose_camera():
     found=cameras()
     if not found: raise RuntimeError('No webcam found')
-    print('Detected webcams:', ', '.join(map(str,found)))
+    print('Detected webcams:',found)
     while True:
-        value=input('Camera index: ').strip()
-        if value.isdigit() and int(value) in found:return int(value)
-        print('Choose one of:',found)
-
-def projector_screens():
-    screens=[]
-    try:
-        import ctypes
-        user32=ctypes.windll.user32
-        screens=list(range(max(1,user32.GetSystemMetrics(80))))
-    except Exception:
-        screens=[0]
-    return screens
+        v=input('Camera index: ').strip()
+        if v.isdigit() and int(v) in found: return int(v)
 
 def choose_projector():
-    screens=projector_screens()
-    if len(screens)==1:
-        print('Only one display detected. Using display 0 for the white calibration screen.')
-        return 0
-    print('Detected displays:', ', '.join(map(str,screens)))
-    while True:
-        value=input('Projector display index: ').strip()
-        if value.isdigit() and int(value) in screens:return int(value)
-        print('Choose one of:',screens)
-
-def show_white_projector(display_index):
-    name='Living Pookalam - Projector Alignment'
-    cv2.namedWindow(name,cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(name,cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
-    # On Windows, OpenCV can move a fullscreen window to a secondary display.
     try:
         import ctypes
-        user32=ctypes.windll.user32
-        width=user32.GetSystemMetrics(0); height=user32.GetSystemMetrics(1)
-        if display_index>0:
-            cv2.moveWindow(name,width*(display_index),0)
-    except Exception:
-        pass
-    white=np.full((1080,1920,3),255,dtype=np.uint8)
-    cv2.imshow(name,white)
-    cv2.waitKey(100)
+        count=max(1,ctypes.windll.user32.GetSystemMetrics(80))
+    except Exception: count=1
+    print('Detected displays:',list(range(count)))
+    while True:
+        v=input('Projector display index: ').strip()
+        if v.isdigit() and 0<=int(v)<count: return int(v)
+
+def show_white_projector(index):
+    name='Living Pookalam - Projector White Field'
+    cv2.namedWindow(name,cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(name,cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
+    try:
+        import ctypes
+        width=ctypes.windll.user32.GetSystemMetrics(0)
+        cv2.moveWindow(name,width*index,0)
+    except Exception: pass
+    cv2.imshow(name,np.full((1080,1920,3),255,np.uint8)); cv2.waitKey(100)
     return name
 
-def order_and_validate(points):
-    if len(points)!=4: raise ValueError('Exactly four points required')
-    pts=np.array(points,dtype=np.float32)
-    area=cv2.contourArea(pts.reshape(-1,1,2))
-    if abs(area)<100: raise ValueError('Selected area is too small')
-    return pts
+def validate(points,label):
+    if len(points)!=4: raise ValueError(f'{label}: exactly four points required')
+    pts=np.asarray(points,np.float32)
+    if abs(cv2.contourArea(pts.reshape(-1,1,2)))<100: raise ValueError(f'{label}: area too small')
+    return pts.tolist()
+
+def point_inside_quad(point,quad):
+    return cv2.pointPolygonTest(np.asarray(quad,np.float32),tuple(point),False)>=0
 
 def calibrate(camera_index,projector_index):
     projector_window=show_white_projector(projector_index)
     cap=cv2.VideoCapture(camera_index)
-    if not cap.isOpened():
-        cv2.destroyWindow(projector_window)
-        raise RuntimeError('Cannot open selected webcam')
-    points=[]; drag=[None]
-    names=['TOP-LEFT','TOP-RIGHT','BOTTOM-RIGHT','BOTTOM-LEFT']
-    window='Living Pookalam - Floor Calibration'
-    cv2.namedWindow(window,cv2.WINDOW_NORMAL)
+    if not cap.isOpened(): raise RuntimeError('Cannot open selected webcam')
+    stages=[('PROJECTOR FIELD',['TOP-LEFT','TOP-RIGHT','BOTTOM-RIGHT','BOTTOM-LEFT']),('FLOOR BOUNDARY',['TOP-LEFT','TOP-RIGHT','BOTTOM-RIGHT','BOTTOM-LEFT'])]
+    stage=0; points=[[],[]]; drag=[None]
+    window='Living Pookalam - Two Stage Calibration'; cv2.namedWindow(window,cv2.WINDOW_NORMAL)
     def mouse(event,x,y,flags,param):
+        active=points[stage]
         if event==cv2.EVENT_LBUTTONDOWN:
-            if len(points)<4: points.append([x,y])
+            if len(active)<4: active.append([x,y])
             else:
-                d=np.linalg.norm(np.array(points)-[x,y],axis=1); drag[0]=int(np.argmin(d)) if d.min()<30 else None
-        elif event==cv2.EVENT_MOUSEMOVE and drag[0] is not None and flags&cv2.EVENT_FLAG_LBUTTON: points[drag[0]]=[x,y]
+                d=np.linalg.norm(np.asarray(active)-[x,y],axis=1)
+                if d.min()<30: drag[0]=int(np.argmin(d))
+        elif event==cv2.EVENT_MOUSEMOVE and drag[0] is not None and flags&cv2.EVENT_FLAG_LBUTTON: active[drag[0]]=[x,y]
         elif event==cv2.EVENT_LBUTTONUP: drag[0]=None
     cv2.setMouseCallback(window,mouse)
     while True:
         ok,frame=cap.read()
         if not ok: continue
-        for i,p in enumerate(points):
-            cv2.circle(frame,tuple(map(int,p)),9,(0,0,255),-1)
-            cv2.putText(frame,str(i+1),tuple(map(int,np.array(p)+[12,-12])),cv2.FONT_HERSHEY_SIMPLEX,.7,(255,255,255),2)
-        if len(points)>1: cv2.polylines(frame,[np.array(points,np.int32)],len(points)==4,(0,255,0),2)
-        step=names[len(points)] if len(points)<4 else 'DRAG TO ADJUST - S=SAVE, R=RESET, U=UNDO'
-        cv2.putText(frame,'PROJECTOR WHITE SCREEN ON - Click: '+step,(20,35),cv2.FONT_HERSHEY_SIMPLEX,.65,(0,255,0),2)
+        colors=[(0,255,255),(0,255,0)]
+        for s,pts in enumerate(points):
+            for i,p in enumerate(pts):
+                cv2.circle(frame,tuple(map(int,p)),8,colors[s],-1)
+                cv2.putText(frame,f'{"P" if s==0 else "F"}{i+1}',tuple(map(int,np.asarray(p)+[10,-10])),cv2.FONT_HERSHEY_SIMPLEX,.6,(255,255,255),2)
+            if len(pts)>1: cv2.polylines(frame,[np.asarray(pts,np.int32)],len(pts)==4,colors[s],2)
+        title,names=stages[stage]
+        if len(points[stage])<4: hint=f'{title}: click {names[len(points[stage])]}'
+        elif stage==0: hint='PROJECTOR FIELD READY - press S for FLOOR BOUNDARY'
+        else: hint='FLOOR READY - drag pins, S=SAVE, U=UNDO, R=RESET, Esc=CANCEL'
+        cv2.putText(frame,hint,(20,35),cv2.FONT_HERSHEY_SIMPLEX,.62,(255,255,255),2)
+        cv2.putText(frame,'Yellow=P projector field | Green=F actual floor | White projector remains ON',(20,65),cv2.FONT_HERSHEY_SIMPLEX,.5,(255,255,255),1)
         cv2.imshow(window,frame); key=cv2.waitKey(1)&0xFF
         if key==27: break
-        if key in (ord('r'),ord('R')): points.clear()
-        if key in (ord('u'),ord('U')) and points: points.pop()
-        if key in (ord('s'),ord('S')) and len(points)==4:
+        if key in (ord('r'),ord('R')): points[stage].clear()
+        if key in (ord('u'),ord('U')) and points[stage]: points[stage].pop()
+        if key in (ord('s'),ord('S')):
             try:
-                pts=order_and_validate(points)
-                CONFIG.write_text(json.dumps({'version':VERSION,'camera_index':camera_index,'projector_display_index':projector_index,'floor_points_camera':pts.tolist()},indent=2))
-                print('Calibration saved to',CONFIG); break
+                if stage==0:
+                    validate(points[0],'Projector field'); stage=1
+                else:
+                    projector_field=validate(points[0],'Projector field'); floor=validate(points[1],'Floor boundary')
+                    if not all(point_inside_quad(p,projector_field) for p in floor): raise ValueError('Every floor boundary point must be inside the projector field')
+                    CONFIG.write_text(json.dumps({'version':VERSION,'camera_index':camera_index,'projector_display_index':projector_index,'projector_field_camera':projector_field,'floor_boundary_camera':floor},indent=2))
+                    print('Two-stage calibration saved to',CONFIG); break
             except ValueError as e: print(e)
     cap.release(); cv2.destroyWindow(window); cv2.destroyWindow(projector_window); cv2.destroyAllWindows()
 
 def main():
-    mandatory_update_check()
-    projector=choose_projector()
-    calibrate(choose_camera(),projector)
+    mandatory_update_check(); projector=choose_projector(); calibrate(choose_camera(),projector)
 if __name__=='__main__': main()
