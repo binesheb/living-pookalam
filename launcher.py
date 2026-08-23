@@ -1,11 +1,12 @@
-"""Runtime compatibility launcher for optional Pookalam artwork."""
+"""Runtime compatibility launcher for optional artwork and reliable debug toggling."""
 import threading
 import cv2
 import numpy as np
 import main as app
 
-app.VERSION = '2.6.0'
+app.VERSION = '2.6.1'
 _original_build_projection = app.build_projection
+
 
 def build_projection_optional(img, cfg):
     if img is None:
@@ -13,7 +14,22 @@ def build_projection_optional(img, cfg):
         return np.zeros((ph, pw, 3), dtype=np.uint8)
     return _original_build_projection(img, cfg)
 
+
 app.build_projection = build_projection_optional
+
+# Close every debug window immediately when Debug is switched OFF.
+_original_toggle_debug = app.App.toggle_debug
+
+def toggle_debug_reliable(self):
+    _original_toggle_debug(self)
+    if not self.debug.is_set():
+        app.debug_close()
+        # Force HighGUI to process pending window-destroy messages.
+        cv2.waitKey(1)
+
+
+app.App.toggle_debug = toggle_debug_reliable
+
 
 def project_optional(self):
     if self.worker and self.worker.is_alive():
@@ -35,6 +51,7 @@ def project_optional(self):
 
     self.worker = threading.Thread(target=work, daemon=True)
     self.worker.start()
+
 
 app.App.project = project_optional
 
