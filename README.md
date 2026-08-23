@@ -1,23 +1,42 @@
 # Living Pookalam
 
-Windows desktop application for perspective-correct image projection onto a calibrated floor area.
+Living Pookalam projects artwork onto a calibrated floor area and provides the foundation for interactive camera-driven effects.
+
+## Version 2 foundation
+
+- Image upload and manual crop
+- Projector always uses the Windows extended display
+- Two-stage calibration:
+  1. mark the full projector field in the camera image
+  2. mark the designated physical floor area inside it
+- Perspective correction from the camera-observed quadrilateral to normalized floor coordinates
+- Warped projector output
+- Motion detection across the complete projector field
+- Detailed rectified analysis inside the designated floor area
+- Contour position and normalized interaction coordinates
+- Vision Debug windows for validating camera understanding
+- Manual `Update from GitHub` button
+- Startup performs one `git pull --ff-only`; the application itself never pulls or restarts recursively
 
 ## Start
 
-Run `run_windows.bat`.
+On Windows:
 
-The launcher performs exactly one `git pull --ff-only` before starting the application, then creates/uses `.venv`, installs dependencies, and launches `main.py`. The running application never performs `git pull` and never restarts itself for updates.
+```bat
+run_windows.bat
+```
+
+Requirements: Python 3, Git, a camera, and a projector configured in **Windows Extend** mode.
 
 ## Workflow
 
 1. Select and crop an image.
-2. Calibrate using the webcam.
-3. Mark the four corners of the projector field.
-4. Mark the four corners of the physical floor boundary inside that field.
-5. Project the warped image to the Windows extended display.
+2. Calibrate the projector field and floor boundary.
+3. Use **Vision Debug** to verify global motion and rectified floor analysis.
+4. Use **Project** to send the warped image only to the extended projector display.
 
-The main display is used for the GUI and camera calibration. Projector output is intended for the extended display.
+Press `Esc` or `Q` to close OpenCV projection or debug windows.
 
-## Version
+## Interaction data
 
-Current release: 1.0.2
+The floor is normalized to coordinates from `(0,0)` to `(1,1)`. Future interactive effects should consume this normalized coordinate space rather than raw camera pixels.
