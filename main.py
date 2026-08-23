@@ -5,8 +5,8 @@ from tkinter import filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk
 import cv2, numpy as np
 
-VERSION='2.3.1'; ROOT=Path(__file__).resolve().parent; CONFIG=ROOT/'calibration.json'
-
+VERSION='2.4.0'; ROOT=Path(__file__).resolve().parent; CONFIG=ROOT/'calibration.json'
+DEBUG_NAMES=['Debug - Camera','Debug - Scene Baseline','Debug - Field Difference','Debug - Field Mask','Debug - Floor Live','Debug - Floor Baseline','Debug - Floor Difference','Debug - Floor Mask','Interactive Pookalam - Learning Baseline']
 def run_git_pull():
  r=subprocess.run(['git','pull','--ff-only'],cwd=ROOT,capture_output=True,text=True,timeout=60); return r.returncode==0,(r.stdout+r.stderr).strip()
 def projector_geometry():
@@ -46,48 +46,60 @@ def build_projection(img,cfg):
  _,_,pw,ph=projector_geometry(); field=np.float32(cfg['projector_field_camera']); floor=np.float32(cfg['floor_boundary_camera']); unit=np.float32([[0,0],[1,0],[1,1],[0,1]]); rect=np.float32([[0,0],[pw,0],[pw,ph],[0,ph]])
  cam_to_proj=cv2.getPerspectiveTransform(field,rect); floor_to_cam=np.linalg.inv(cv2.getPerspectiveTransform(floor,unit)); src=np.float32([[0,0],[img.shape[1]-1,0],[img.shape[1]-1,img.shape[0]-1],[0,img.shape[0]-1]])
  return cv2.warpPerspective(img,(cam_to_proj@floor_to_cam)@cv2.getPerspectiveTransform(src,unit),(pw,ph),borderValue=(0,0,0))
-def learn_baseline(cap,field,Hfloor,stop_event,seconds=10):
+def learn_baseline(cap,field,Hfloor,stop_event,seconds=10,debug=False):
  samples=[]; floors=[]; start=time.time(); last=0
  while time.time()-start<seconds and not stop_event.is_set():
   ok,frame=cap.read()
   if not ok: continue
   now=time.time()
   if now-last<0.12: continue
-  last=now; samples.append(frame.copy()); floors.append(cv2.warpPerspective(frame,Hfloor,(640,640)))
-  remain=max(0,int(seconds-(now-start)+.99)); view=frame.copy(); cv2.polylines(view,[field.astype(np.int32)],True,(0,255,255),2); cv2.putText(view,f'LEARNING PROJECTED SCENE - KEEP CLEAR - {remain}s',(15,35),0,.8,(0,0,255),2); cv2.imshow('Interactive Pookalam - Learning Baseline',view); cv2.waitKey(1)
+  last=now; floor=cv2.warpPerspective(frame,Hfloor,(640,640)); samples.append(frame.copy()); floors.append(floor)
+  remain=max(0,int(seconds-(now-start)+.99)); view=frame.copy(); cv2.polylines(view,[field.astype(np.int32)],True,(0,255,255),2); cv2.putText(view,f'LEARNING PROJECTED SCENE - KEEP CLEAR - {remain}s',(15,35),0,.8,(0,0,255),2)
+  if debug: cv2.imshow('Interactive Pookalam - Learning Baseline',view); cv2.imshow('Debug - Camera',frame); cv2.imshow('Debug - Floor Live',floor)
+  cv2.waitKey(1)
  if stop_event.is_set() or not samples:return None,None
  return np.median(np.stack(samples).astype(np.float32),axis=0).astype(np.uint8),np.median(np.stack(floors).astype(np.float32),axis=0).astype(np.uint8)
 def difference(a,b,threshold=35):
- d=cv2.absdiff(cv2.GaussianBlur(cv2.cvtColor(a,cv2.COLOR_BGR2GRAY),(7,7),0),cv2.GaussianBlur(cv2.cvtColor(b,cv2.COLOR_BGR2GRAY),(7,7),0)); return cv2.threshold(d,threshold,255,cv2.THRESH_BINARY)[1]
-def interaction_loop(img,stop_event):
+ d=cv2.absdiff(cv2.GaussianBlur(cv2.cvtColor(a,cv2.COLOR_BGR2GRAY),(7,7),0),cv2.GaussianBlur(cv2.cvtColor(b,cv2.COLOR_BGR2GRAY),(7,7),0)); return d,cv2.threshold(d,threshold,255,cv2.THRESH_BINARY)[1]
+def debug_close():
+ for n in DEBUG_NAMES:
+  try: cv2.destroyWindow(n)
+  except: pass
+def interaction_loop(img,stop_event,debug_event):
  if not CONFIG.exists(): raise RuntimeError('Calibrate first')
  cfg=json.loads(CONFIG.read_text()); _,_,pw,ph=projector_geometry(); stable=build_projection(img,cfg); pname=projector_window('Living Pookalam - Projection',stable); cap=cv2.VideoCapture(cfg['camera_index']); field=np.float32(cfg['projector_field_camera']); floor=np.float32(cfg['floor_boundary_camera']); F=np.float32([[0,0],[pw,0],[pw,ph],[0,ph]]); S=np.float32([[0,0],[640,0],[640,640],[0,640]]); Hfield=cv2.getPerspectiveTransform(field,F); Hfloor=cv2.getPerspectiveTransform(floor,S)
- scene_base,floor_base=learn_baseline(cap,field,Hfloor,stop_event)
+ scene_base,floor_base=learn_baseline(cap,field,Hfloor,stop_event,debug=debug_event.is_set())
  if scene_base is None: cap.release(); return
- cv2.destroyWindow('Interactive Pookalam - Learning Baseline'); pulses=[]; kernel=np.ones((5,5),np.uint8)
+ kernel=np.ones((5,5),np.uint8); pulses=[]; frame_count=0; tick=time.time(); fps=0
  while not stop_event.is_set():
   ok,frame=cap.read()
   if not ok: continue
-  motion=difference(frame,scene_base); fieldmask=np.zeros(motion.shape,np.uint8); cv2.fillPoly(fieldmask,[field.astype(np.int32)],255); motion=cv2.morphologyEx(cv2.bitwise_and(motion,fieldmask),cv2.MORPH_OPEN,kernel); motion=cv2.dilate(motion,None,iterations=2); cnt,_=cv2.findContours(motion,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE); global_hits=[]
+  debug=debug_event.is_set(); frame_count+=1
+  if time.time()-tick>=1: fps=frame_count/(time.time()-tick); frame_count=0; tick=time.time()
+  fdiff,motion=difference(frame,scene_base); fieldmask=np.zeros(motion.shape,np.uint8); cv2.fillPoly(fieldmask,[field.astype(np.int32)],255); motion=cv2.morphologyEx(cv2.bitwise_and(motion,fieldmask),cv2.MORPH_OPEN,kernel); motion=cv2.dilate(motion,None,iterations=2); cnt,_=cv2.findContours(motion,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE); global_hits=[]
   for q in cnt:
    if cv2.contourArea(q)<250: continue
    m=cv2.moments(q)
    if not m['m00']:continue
    cx,cy=m['m10']/m['m00'],m['m01']/m['m00']; p=cv2.perspectiveTransform(np.float32([[[cx,cy]]]),Hfield)[0,0]; global_hits.append(p); pulses.append([float(p[0]),float(p[1]),time.time()])
-  rectified=cv2.warpPerspective(frame,Hfloor,(640,640)); rmask=difference(rectified,floor_base); rmask=cv2.morphologyEx(rmask,cv2.MORPH_OPEN,kernel); rmask=cv2.dilate(rmask,None,iterations=2); contours,_=cv2.findContours(rmask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE); interactions=[]
+  rectified=cv2.warpPerspective(frame,Hfloor,(640,640)); rdiff,rmask=difference(rectified,floor_base); rmask=cv2.morphologyEx(rmask,cv2.MORPH_OPEN,kernel); rmask=cv2.dilate(rmask,None,iterations=2); contours,_=cv2.findContours(rmask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE); interactions=[]; floor_debug=rectified.copy()
   for q in contours:
    if cv2.contourArea(q)<500:continue
-   x,y,w,h=cv2.boundingRect(q); interactions.append(((x+w/2)/640,(y+h/2)/640)); cv2.rectangle(rectified,(x,y),(x+w,y+h),(0,255,0),2)
-  # Detection always compares against the stable learned projection. Effects never enter the camera baseline.
+   x,y,w,h=cv2.boundingRect(q); u,v=(x+w/2)/640,(y+h/2)/640; interactions.append((u,v)); cv2.rectangle(floor_debug,(x,y),(x+w,y+h),(0,255,0),2); cv2.putText(floor_debug,f'{u:.3f},{v:.3f}',(x,max(15,y-5)),0,.45,(0,255,0),1)
   effect=stable.copy(); now=time.time(); pulses=[z for z in pulses if now-z[2]<1.2]
   for x,y,t in pulses:
    age=now-t; radius=int(35+age*180); layer=effect.copy(); cv2.circle(layer,(int(x),int(y)),radius,(255,255,255),max(1,4-int(age*2))); effect=cv2.addWeighted(effect,.92,layer,.08,0)
-  cv2.imshow(pname,effect); view=frame.copy(); cv2.polylines(view,[field.astype(np.int32)],True,(0,255,255),2); cv2.polylines(view,[floor.astype(np.int32)],True,(0,255,0),2); cv2.putText(view,f'REFERENCE LOCKED | FIELD {len(global_hits)} | FLOOR {len(interactions)}',(15,30),0,.65,(0,0,255),2); cv2.imshow('Interactive Pookalam - Camera Field',view); cv2.imshow('Interactive Pookalam - Floor Detail',rectified); cv2.waitKey(1)
- cap.release(); cv2.destroyAllWindows()
+  cv2.imshow(pname,effect)
+  if debug:
+   view=frame.copy(); cv2.polylines(view,[field.astype(np.int32)],True,(0,255,255),2); cv2.polylines(view,[floor.astype(np.int32)],True,(0,255,0),2); cv2.putText(view,f'DEBUG | FPS {fps:.1f} | FIELD {len(global_hits)} | FLOOR {len(interactions)}',(15,30),0,.65,(0,0,255),2)
+   cv2.imshow('Debug - Camera',view); cv2.imshow('Debug - Scene Baseline',scene_base); cv2.imshow('Debug - Field Difference',fdiff); cv2.imshow('Debug - Field Mask',motion); cv2.imshow('Debug - Floor Live',floor_debug); cv2.imshow('Debug - Floor Baseline',floor_base); cv2.imshow('Debug - Floor Difference',rdiff); cv2.imshow('Debug - Floor Mask',rmask)
+  else: debug_close()
+  cv2.waitKey(1)
+ cap.release(); debug_close(); cv2.destroyAllWindows()
 class Crop(tk.Toplevel):
  def __init__(self,parent,path,done):
   super().__init__(parent); self.title('Crop Pookalam Image'); self.done=done; self.src=Image.open(path).convert('RGB'); self.s=min(900/self.src.width,600/self.src.height,1); d=self.src.resize((int(self.src.width*self.s),int(self.src.height*self.s))); self.c=tk.Canvas(self,width=d.width,height=d.height,cursor='crosshair'); self.c.pack(padx=10,pady=10); self.i=ImageTk.PhotoImage(d); self.c.create_image(0,0,anchor='nw',image=self.i); self.a=self.box=self.r=None; self.c.bind('<Button-1>',self.down); self.c.bind('<B1-Motion>',self.drag); self.c.bind('<ButtonRelease-1>',self.up); tk.Button(self,text='Use Crop',command=self.ok,width=18).pack(pady=8)
- def down(self,e): self.a=(e.x,e.y); self.r=self.c.create_rectangle(e.x,e.y,e.x,e.y,outline='red',width=2)
+ def down(self,e): self.a=(e.x,e.y); self.r=self.c.create_rectangle(e.x,e.y,e.x,e.y)
  def drag(self,e):
   if self.a:self.c.coords(self.r,*self.a,e.x,e.y)
  def up(self,e): self.box=(*self.a,e.x,e.y)
@@ -98,9 +110,12 @@ class Crop(tk.Toplevel):
   self.destroy()
 class App(tk.Tk):
  def __init__(self):
-  super().__init__(); self.title('Interactive Pookalam'); self.geometry('1120x780'); self.image=None; self.preview=None; self.stop=threading.Event(); self.worker=None; top=tk.Frame(self,padx=24,pady=20); top.pack(fill='x'); tk.Label(top,text='INTERACTIVE POOKALAM',font=('Segoe UI',26,'bold')).pack(anchor='w'); tk.Label(top,text='Stable projected reference + external interaction detection',font=('Segoe UI',11)).pack(anchor='w'); bar=tk.Frame(top); bar.pack(anchor='w',pady=16)
-  for text,cmd in [('Select & Crop',self.select),('Calibrate Zones',self.cal),('Start Interactive',self.project),('Stop',self.stop_projection),('Close App',self.close_app),('Update from GitHub',self.update)]: tk.Button(bar,text=text,command=cmd,width=17,height=2).pack(side='left',padx=3)
-  self.status=tk.Label(top,text='Ready'); self.status.pack(anchor='w'); self.view=tk.Label(self,text='POOKALAM REFERENCE IMAGE',font=('Segoe UI',16)); self.view.pack(expand=True,fill='both',padx=20,pady=20); self.protocol('WM_DELETE_WINDOW',self.close_app)
+  super().__init__(); self.title('Interactive Pookalam'); self.geometry('1120x780'); self.image=None; self.preview=None; self.stop=threading.Event(); self.debug=threading.Event(); self.worker=None; top=tk.Frame(self,padx=24,pady=20); top.pack(fill='x'); tk.Label(top,text='INTERACTIVE POOKALAM',font=('Segoe UI',26,'bold')).pack(anchor='w'); tk.Label(top,text='Stable projected reference + external interaction detection',font=('Segoe UI',11)).pack(anchor='w'); bar=tk.Frame(top); bar.pack(anchor='w',pady=16)
+  for text,cmd in [('Select & Crop',self.select),('Calibrate Zones',self.cal),('Start Interactive',self.project),('Debug: OFF',self.toggle_debug),('Stop',self.stop_projection),('Close App',self.close_app),('Update from GitHub',self.update)]: tk.Button(bar,text=text,command=cmd,width=17,height=2).pack(side='left',padx=3)
+  self.debug_button=bar.winfo_children()[-4]; self.status=tk.Label(top,text='Ready'); self.status.pack(anchor='w'); self.view=tk.Label(self,text='POOKALAM REFERENCE IMAGE',font=('Segoe UI',16)); self.view.pack(expand=True,fill='both',padx=20,pady=20); self.protocol('WM_DELETE_WINDOW',self.close_app)
+ def toggle_debug(self):
+  if self.debug.is_set(): self.debug.clear(); self.debug_button.configure(text='Debug: OFF'); debug_close(); self.status.configure(text='Debug mode disabled')
+  else:self.debug.set(); self.debug_button.configure(text='Debug: ON'); self.status.configure(text='Debug mode enabled')
  def select(self):
   p=filedialog.askopenfilename(filetypes=[('Images','*.png *.jpg *.jpeg *.bmp *.webp')]);
   if p:Crop(self,p,self.setimg)
@@ -119,12 +134,12 @@ class App(tk.Tk):
   if self.worker and self.worker.is_alive():return
   self.stop.clear(); img=cv2.cvtColor(np.array(self.image),cv2.COLOR_RGB2BGR); self.status.configure(text='Learning stable projected scene for 10 seconds - keep clear')
   def work():
-   try:interaction_loop(img,self.stop)
+   try:interaction_loop(img,self.stop,self.debug)
    except Exception as e:self.after(0,lambda:messagebox.showerror('Interactive Pookalam',str(e)))
    finally:self.after(0,lambda:self.status.configure(text='Stopped'))
   self.worker=threading.Thread(target=work,daemon=True); self.worker.start()
  def stop_projection(self):self.stop.set(); self.status.configure(text='Stopping...')
- def close_app(self):self.stop.set(); cv2.destroyAllWindows(); self.destroy()
+ def close_app(self):self.stop.set(); debug_close(); cv2.destroyAllWindows(); self.destroy()
  def update(self):
   self.status.configure(text='Updating from GitHub...'); self.update_idletasks()
   def work():
