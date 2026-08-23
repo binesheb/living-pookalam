@@ -5,7 +5,7 @@ from tkinter import filedialog,messagebox
 from PIL import Image,ImageTk
 import cv2,numpy as np
 from auto_calibration import run as auto_run
-VERSION='3.3.1';ROOT=Path(__file__).resolve().parent;CONFIG=ROOT/'calibration.json'
+VERSION='3.3.2';ROOT=Path(__file__).resolve().parent;CONFIG=ROOT/'calibration.json'
 DEBUG_NAMES=['Debug - Camera','Debug - Floor Live','Debug - Pookalam Source','Debug - Pookalam Detection','LP Auto Calibration']
 BG='#101522';PANEL='#192133';PANEL2='#222c40';TEXT='#eef3ff';MUTED='#9ba9c3';ACCENT='#f4b942';RED='#ef6b73';BLUE='#6395ff'
 def projector_geometry():
@@ -60,6 +60,12 @@ def build_projection(img,cfg):
  _,_,pw,ph=projector_geometry()
  if img is None:return np.zeros((ph,pw,3),np.uint8)
  field=np.float32(cfg['projector_field_camera']);floor=np.float32(cfg['floor_boundary_camera']);H1=cv2.getPerspectiveTransform(field,np.float32([[0,0],[pw,0],[pw,ph],[0,ph]]));H2=np.linalg.inv(cv2.getPerspectiveTransform(floor,np.float32([[0,0],[1,0],[1,1],[0,1]])));src=np.float32([[0,0],[img.shape[1]-1,0],[img.shape[1]-1,img.shape[0]-1],[0,img.shape[0]-1]]);return cv2.warpPerspective(img,(H1@H2)@cv2.getPerspectiveTransform(src,np.float32([[0,0],[1,0],[1,1],[0,1]])),(pw,ph))
+def _capture_stable(cap,n=12):
+ frames=[]
+ for _ in range(n):
+  ok,f=cap.read()
+  if ok:frames.append(f.copy())
+ return np.median(np.stack(frames),axis=0).astype(np.uint8) if frames else None
 class App(tk.Tk):
  def __init__(self):
   super().__init__();self.title('Living Pookalam');self.geometry('900x650');self.configure(bg=BG);self.image=None;self.worker=None;self.stop=threading.Event();self.debug=threading.Event()
@@ -67,7 +73,7 @@ class App(tk.Tk):
   self.buttons=[('Upload & Crop',self.select,ACCENT,'#111'),('Calibrate Zones',self.cal,PANEL2,TEXT),('Auto Calibrate',self.auto_calibrate,BLUE,'white'),('Start Experience',self.project,ACCENT,'#111'),('Debug: OFF',self.toggle_debug,PANEL2,TEXT),('Stop Experience',self.stop_projection,RED,'white'),('Update from GitHub',self.update,PANEL2,TEXT),('Close',self.close_app,PANEL2,TEXT)]
   for title,cmd,bg,fg in self.buttons:tk.Button(left,text=title,command=cmd,bg=bg,fg=fg,relief='flat',padx=20,pady=12).pack(fill='x',padx=18,pady=4)
   self.status=tk.Label(self,text='Ready',font=('Segoe UI',15),bg=BG,fg=TEXT);self.status.pack(pady=35);self.view=tk.Label(self,text='No image uploaded — physical Pookalam detection will be used',bg=PANEL2,fg=MUTED,font=('Segoe UI',14),wraplength=500);self.view.pack(expand=True,fill='both',padx=40,pady=40)
- def set_state(self,text,*_):self.status.configure(text=text)
+ def set_state(self,text,*_):self.after(0,lambda:self.status.configure(text=text))
  def select(self):
   p=filedialog.askopenfilename(filetypes=[('Images','*.png *.jpg *.jpeg *.bmp')])
   if not p:return
@@ -79,19 +85,27 @@ class App(tk.Tk):
   if self.worker and self.worker.is_alive():return
   cs=cameras()
   if not cs:messagebox.showerror('Auto Calibration','No camera found');return
-  idx=cs[0];self.stop.clear();self.set_state('Auto calibration: projecting and detecting markers...')
+  idx=cs[0];self.stop.clear();self.set_state('Auto calibration: projecting markers...')
   def work():
    cap=cv2.VideoCapture(idx)
    try:
-    _,_,pw,ph=projector_geometry();win=projector_window('LP Auto Calibration',np.full((ph,pw,3),255,np.uint8));result=auto_run(cap,lambda im:(cv2.imshow(win,cv2.resize(im,(pw,ph))),cv2.waitKey(1)),(pw,ph),stop=self.stop)
+    _,_,pw,ph=projector_geometry();win=projector_window('LP Auto Calibration',np.full((ph,pw,3),255,np.uint8));
+    def show(im):cv2.imshow(win,cv2.resize(im,(pw,ph)));cv2.waitKey(1)
+    result=auto_run(cap,show,(pw,ph),stop=self.stop)
     if result is None or result['quality']<.35:raise RuntimeError('Marker detection quality too low. Reposition camera/projector and try again.')
-    frame=None
-    for _ in range(15):ok,frame=cap.read()
-    if frame is None:raise RuntimeError('Camera frame unavailable')
+    # Remove the calibration pattern before analysing the physical artwork.
+    show(np.zeros((ph,pw,3),np.uint8));time.sleep(.7);frame=_capture_stable(cap,18)
+    if frame is None:raise RuntimeError('Camera frame unavailable after marker calibration')
     from pookalam_vision import detect_pookalam
-    v=detect_pookalam(frame);c=np.array(v['center'],float);r=max(60,v['radius']);floor=np.array([[c[0]-r,c[1]-r],[c[0]+r,c[1]-r],[c[0]+r,c[1]+r],[c[0]-r,c[1]+r]],float)
-    field=np.array(result['projector_field_camera'],float);floor[:,0]=np.clip(floor[:,0],field[:,0].min(),field[:,0].max());floor[:,1]=np.clip(floor[:,1],field[:,1].min(),field[:,1].max())
-    CONFIG.write_text(json.dumps({'camera_index':idx,'projector_field_camera':result['projector_field_camera'],'floor_boundary_camera':floor.tolist(),'auto_calibrated':True,'quality':result['quality'],'pookalam_confidence':v['confidence']},indent=2));self.after(0,lambda:self.set_state(f"Auto calibration complete — projector {result['quality']:.0%}, Pookalam {v['confidence']:.0%}"))
+    v=detect_pookalam(frame)
+    if v['confidence']<.45:raise RuntimeError('Pookalam could not be identified reliably. Improve lighting/visibility or use manual Calibrate Zones.')
+    field=np.float32(result['projector_field_camera']);floor=np.float32(v['boundary'])
+    inside=[cv2.pointPolygonTest(field,tuple(p),False)>=0 for p in floor]
+    if not all(inside):raise RuntimeError('Detected Pookalam extends outside the calibrated projector field.')
+    area=cv2.contourArea(floor)
+    if area<0.08*cv2.contourArea(field):raise RuntimeError('Detected Pookalam area is too small for reliable projection alignment.')
+    CONFIG.write_text(json.dumps({'camera_index':idx,'projector_field_camera':field.tolist(),'floor_boundary_camera':floor.tolist(),'auto_calibrated':True,'quality':result['quality'],'pookalam_confidence':v['confidence'],'pookalam_ellipse':v['ellipse']},indent=2))
+    self.set_state(f"Auto calibration complete — field {result['quality']:.0%} | Pookalam {v['confidence']:.0%}")
    except Exception as e:self.after(0,lambda:messagebox.showerror('Auto Calibration',str(e)))
    finally:cap.release();cv2.destroyAllWindows()
   self.worker=threading.Thread(target=work,daemon=True);self.worker.start()
