@@ -5,8 +5,9 @@ from tkinter import filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk
 import cv2, numpy as np
 
-VERSION='2.4.0'; ROOT=Path(__file__).resolve().parent; CONFIG=ROOT/'calibration.json'
+VERSION='2.5.0'; ROOT=Path(__file__).resolve().parent; CONFIG=ROOT/'calibration.json'
 DEBUG_NAMES=['Debug - Camera','Debug - Scene Baseline','Debug - Field Difference','Debug - Field Mask','Debug - Floor Live','Debug - Floor Baseline','Debug - Floor Difference','Debug - Floor Mask','Interactive Pookalam - Learning Baseline']
+BG='#101522'; PANEL='#192133'; PANEL2='#222c40'; TEXT='#eef3ff'; MUTED='#9ba9c3'; ACCENT='#f4b942'; GREEN='#4fd18b'; RED='#ef6b73'; BLUE='#6395ff'
 def run_git_pull():
  r=subprocess.run(['git','pull','--ff-only'],cwd=ROOT,capture_output=True,text=True,timeout=60); return r.returncode==0,(r.stdout+r.stderr).strip()
 def projector_geometry():
@@ -43,8 +44,8 @@ def calibration(idx):
    elif all(cv2.pointPolygonTest(np.array(pts[0],np.float32),tuple(p),False)>=0 for p in pts[1]): CONFIG.write_text(json.dumps({'camera_index':idx,'projector_field_camera':pts[0],'floor_boundary_camera':pts[1]},indent=2)); break
  cap.release(); cv2.destroyAllWindows()
 def build_projection(img,cfg):
- _,_,pw,ph=projector_geometry(); field=np.float32(cfg['projector_field_camera']); floor=np.float32(cfg['floor_boundary_camera']); unit=np.float32([[0,0],[1,0],[1,1],[0,1]]); rect=np.float32([[0,0],[pw,0],[pw,ph],[0,ph]])
- cam_to_proj=cv2.getPerspectiveTransform(field,rect); floor_to_cam=np.linalg.inv(cv2.getPerspectiveTransform(floor,unit)); src=np.float32([[0,0],[img.shape[1]-1,0],[img.shape[1]-1,img.shape[0]-1],[0,img.shape[0]-1]])
+ _,_,pw,ph=projector_geometry(); field=np.float32(cfg['projector_field_camera']); floor=np.float32(cfg['floor_boundary_camera']); unit=np.float32([[0,0],[1,0],[1,1],[0,1]]); rect=np.float32([[0,0],[pw,0],[pw,ph]])
+ cam_to_proj=cv2.getPerspectiveTransform(field,np.float32([[0,0],[pw,0],[pw,ph],[0,ph]])); floor_to_cam=np.linalg.inv(cv2.getPerspectiveTransform(floor,unit)); src=np.float32([[0,0],[img.shape[1]-1,0],[img.shape[1]-1,img.shape[0]-1],[0,img.shape[0]-1]])
  return cv2.warpPerspective(img,(cam_to_proj@floor_to_cam)@cv2.getPerspectiveTransform(src,unit),(pw,ph),borderValue=(0,0,0))
 def learn_baseline(cap,field,Hfloor,stop_event,seconds=10,debug=False):
  samples=[]; floors=[]; start=time.time(); last=0
@@ -52,7 +53,7 @@ def learn_baseline(cap,field,Hfloor,stop_event,seconds=10,debug=False):
   ok,frame=cap.read()
   if not ok: continue
   now=time.time()
-  if now-last<0.12: continue
+  if now-last<.12: continue
   last=now; floor=cv2.warpPerspective(frame,Hfloor,(640,640)); samples.append(frame.copy()); floors.append(floor)
   remain=max(0,int(seconds-(now-start)+.99)); view=frame.copy(); cv2.polylines(view,[field.astype(np.int32)],True,(0,255,255),2); cv2.putText(view,f'LEARNING PROJECTED SCENE - KEEP CLEAR - {remain}s',(15,35),0,.8,(0,0,255),2)
   if debug: cv2.imshow('Interactive Pookalam - Learning Baseline',view); cv2.imshow('Debug - Camera',frame); cv2.imshow('Debug - Floor Live',floor)
@@ -67,8 +68,7 @@ def debug_close():
   except: pass
 def interaction_loop(img,stop_event,debug_event):
  if not CONFIG.exists(): raise RuntimeError('Calibrate first')
- cfg=json.loads(CONFIG.read_text()); _,_,pw,ph=projector_geometry(); stable=build_projection(img,cfg); pname=projector_window('Living Pookalam - Projection',stable); cap=cv2.VideoCapture(cfg['camera_index']); field=np.float32(cfg['projector_field_camera']); floor=np.float32(cfg['floor_boundary_camera']); F=np.float32([[0,0],[pw,0],[pw,ph],[0,ph]]); S=np.float32([[0,0],[640,0],[640,640],[0,640]]); Hfield=cv2.getPerspectiveTransform(field,F); Hfloor=cv2.getPerspectiveTransform(floor,S)
- scene_base,floor_base=learn_baseline(cap,field,Hfloor,stop_event,debug=debug_event.is_set())
+ cfg=json.loads(CONFIG.read_text()); _,_,pw,ph=projector_geometry(); stable=build_projection(img,cfg); pname=projector_window('Living Pookalam - Projection',stable); cap=cv2.VideoCapture(cfg['camera_index']); field=np.float32(cfg['projector_field_camera']); floor=np.float32(cfg['floor_boundary_camera']); Hfield=cv2.getPerspectiveTransform(field,np.float32([[0,0],[pw,0],[pw,ph],[0,ph]])); Hfloor=cv2.getPerspectiveTransform(floor,np.float32([[0,0],[640,0],[640,640],[0,640]])); scene_base,floor_base=learn_baseline(cap,field,Hfloor,stop_event,debug=debug_event.is_set())
  if scene_base is None: cap.release(); return
  kernel=np.ones((5,5),np.uint8); pulses=[]; frame_count=0; tick=time.time(); fps=0
  while not stop_event.is_set():
@@ -76,12 +76,12 @@ def interaction_loop(img,stop_event,debug_event):
   if not ok: continue
   debug=debug_event.is_set(); frame_count+=1
   if time.time()-tick>=1: fps=frame_count/(time.time()-tick); frame_count=0; tick=time.time()
-  fdiff,motion=difference(frame,scene_base); fieldmask=np.zeros(motion.shape,np.uint8); cv2.fillPoly(fieldmask,[field.astype(np.int32)],255); motion=cv2.morphologyEx(cv2.bitwise_and(motion,fieldmask),cv2.MORPH_OPEN,kernel); motion=cv2.dilate(motion,None,iterations=2); cnt,_=cv2.findContours(motion,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE); global_hits=[]
+  fdiff,motion=difference(frame,scene_base); fieldmask=np.zeros(motion.shape,np.uint8); cv2.fillPoly(fieldmask,[field.astype(np.int32)],255); motion=cv2.morphologyEx(cv2.bitwise_and(motion,fieldmask),cv2.MORPH_OPEN,kernel); motion=cv2.dilate(motion,None,iterations=2); cnt,_=cv2.findContours(motion,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE); hits=[]
   for q in cnt:
    if cv2.contourArea(q)<250: continue
    m=cv2.moments(q)
    if not m['m00']:continue
-   cx,cy=m['m10']/m['m00'],m['m01']/m['m00']; p=cv2.perspectiveTransform(np.float32([[[cx,cy]]]),Hfield)[0,0]; global_hits.append(p); pulses.append([float(p[0]),float(p[1]),time.time()])
+   p=cv2.perspectiveTransform(np.float32([[[m['m10']/m['m00'],m['m01']/m['m00']]]]),Hfield)[0,0]; hits.append(p); pulses.append([float(p[0]),float(p[1]),time.time()])
   rectified=cv2.warpPerspective(frame,Hfloor,(640,640)); rdiff,rmask=difference(rectified,floor_base); rmask=cv2.morphologyEx(rmask,cv2.MORPH_OPEN,kernel); rmask=cv2.dilate(rmask,None,iterations=2); contours,_=cv2.findContours(rmask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE); interactions=[]; floor_debug=rectified.copy()
   for q in contours:
    if cv2.contourArea(q)<500:continue
@@ -91,15 +91,14 @@ def interaction_loop(img,stop_event,debug_event):
    age=now-t; radius=int(35+age*180); layer=effect.copy(); cv2.circle(layer,(int(x),int(y)),radius,(255,255,255),max(1,4-int(age*2))); effect=cv2.addWeighted(effect,.92,layer,.08,0)
   cv2.imshow(pname,effect)
   if debug:
-   view=frame.copy(); cv2.polylines(view,[field.astype(np.int32)],True,(0,255,255),2); cv2.polylines(view,[floor.astype(np.int32)],True,(0,255,0),2); cv2.putText(view,f'DEBUG | FPS {fps:.1f} | FIELD {len(global_hits)} | FLOOR {len(interactions)}',(15,30),0,.65,(0,0,255),2)
-   cv2.imshow('Debug - Camera',view); cv2.imshow('Debug - Scene Baseline',scene_base); cv2.imshow('Debug - Field Difference',fdiff); cv2.imshow('Debug - Field Mask',motion); cv2.imshow('Debug - Floor Live',floor_debug); cv2.imshow('Debug - Floor Baseline',floor_base); cv2.imshow('Debug - Floor Difference',rdiff); cv2.imshow('Debug - Floor Mask',rmask)
+   view=frame.copy(); cv2.polylines(view,[field.astype(np.int32)],True,(0,255,255),2); cv2.polylines(view,[floor.astype(np.int32)],True,(0,255,0),2); cv2.putText(view,f'DEBUG | FPS {fps:.1f} | FIELD {len(hits)} | FLOOR {len(interactions)}',(15,30),0,.65,(0,0,255),2); cv2.imshow('Debug - Camera',view); cv2.imshow('Debug - Scene Baseline',scene_base); cv2.imshow('Debug - Field Difference',fdiff); cv2.imshow('Debug - Field Mask',motion); cv2.imshow('Debug - Floor Live',floor_debug); cv2.imshow('Debug - Floor Baseline',floor_base); cv2.imshow('Debug - Floor Difference',rdiff); cv2.imshow('Debug - Floor Mask',rmask)
   else: debug_close()
   cv2.waitKey(1)
  cap.release(); debug_close(); cv2.destroyAllWindows()
 class Crop(tk.Toplevel):
  def __init__(self,parent,path,done):
-  super().__init__(parent); self.title('Crop Pookalam Image'); self.done=done; self.src=Image.open(path).convert('RGB'); self.s=min(900/self.src.width,600/self.src.height,1); d=self.src.resize((int(self.src.width*self.s),int(self.src.height*self.s))); self.c=tk.Canvas(self,width=d.width,height=d.height,cursor='crosshair'); self.c.pack(padx=10,pady=10); self.i=ImageTk.PhotoImage(d); self.c.create_image(0,0,anchor='nw',image=self.i); self.a=self.box=self.r=None; self.c.bind('<Button-1>',self.down); self.c.bind('<B1-Motion>',self.drag); self.c.bind('<ButtonRelease-1>',self.up); tk.Button(self,text='Use Crop',command=self.ok,width=18).pack(pady=8)
- def down(self,e): self.a=(e.x,e.y); self.r=self.c.create_rectangle(e.x,e.y,e.x,e.y)
+  super().__init__(parent); self.configure(bg=BG); self.title('Crop Pookalam'); self.done=done; self.src=Image.open(path).convert('RGB'); self.s=min(900/self.src.width,600/self.src.height,1); d=self.src.resize((int(self.src.width*self.s),int(self.src.height*self.s))); self.c=tk.Canvas(self,width=d.width,height=d.height,cursor='crosshair',highlightthickness=0); self.c.pack(padx=12,pady=12); self.i=ImageTk.PhotoImage(d); self.c.create_image(0,0,anchor='nw',image=self.i); self.a=self.box=self.r=None; self.c.bind('<Button-1>',self.down); self.c.bind('<B1-Motion>',self.drag); self.c.bind('<ButtonRelease-1>',self.up); tk.Button(self,text='USE THIS CROP',command=self.ok,bg=ACCENT,fg='#111',relief='flat',padx=20,pady=8).pack(pady=(0,14))
+ def down(self,e): self.a=(e.x,e.y); self.r=self.c.create_rectangle(e.x,e.y,e.x,e.y,outline='white',width=2)
  def drag(self,e):
   if self.a:self.c.coords(self.r,*self.a,e.x,e.y)
  def up(self,e): self.box=(*self.a,e.x,e.y)
@@ -110,43 +109,58 @@ class Crop(tk.Toplevel):
   self.destroy()
 class App(tk.Tk):
  def __init__(self):
-  super().__init__(); self.title('Interactive Pookalam'); self.geometry('1120x780'); self.image=None; self.preview=None; self.stop=threading.Event(); self.debug=threading.Event(); self.worker=None; top=tk.Frame(self,padx=24,pady=20); top.pack(fill='x'); tk.Label(top,text='INTERACTIVE POOKALAM',font=('Segoe UI',26,'bold')).pack(anchor='w'); tk.Label(top,text='Stable projected reference + external interaction detection',font=('Segoe UI',11)).pack(anchor='w'); bar=tk.Frame(top); bar.pack(anchor='w',pady=16)
-  for text,cmd in [('Select & Crop',self.select),('Calibrate Zones',self.cal),('Start Interactive',self.project),('Debug: OFF',self.toggle_debug),('Stop',self.stop_projection),('Close App',self.close_app),('Update from GitHub',self.update)]: tk.Button(bar,text=text,command=cmd,width=17,height=2).pack(side='left',padx=3)
-  self.debug_button=bar.winfo_children()[-4]; self.status=tk.Label(top,text='Ready'); self.status.pack(anchor='w'); self.view=tk.Label(self,text='POOKALAM REFERENCE IMAGE',font=('Segoe UI',16)); self.view.pack(expand=True,fill='both',padx=20,pady=20); self.protocol('WM_DELETE_WINDOW',self.close_app)
+  super().__init__(); self.title('Interactive Pookalam'); self.geometry('1280x820'); self.minsize(1050,700); self.configure(bg=BG); self.image=None; self.preview=None; self.stop=threading.Event(); self.debug=threading.Event(); self.worker=None
+  self.columnconfigure(1,weight=1); self.rowconfigure(1,weight=1)
+  self.sidebar=tk.Frame(self,bg=PANEL,width=265); self.sidebar.grid(row=0,column=0,rowspan=2,sticky='nsew'); self.sidebar.grid_propagate(False)
+  tk.Label(self.sidebar,text='LIVING',font=('Segoe UI',11,'bold'),bg=PANEL,fg=ACCENT).pack(anchor='w',padx=25,pady=(30,0)); tk.Label(self.sidebar,text='POOKALAM',font=('Segoe UI',25,'bold'),bg=PANEL,fg=TEXT).pack(anchor='w',padx=25); tk.Label(self.sidebar,text='Interactive projection studio',font=('Segoe UI',9),bg=PANEL,fg=MUTED).pack(anchor='w',padx=25,pady=(3,28))
+  self.side_section('PROJECT'); self.side_btn('Upload & Crop','Load a reference image',self.select); self.side_btn('Calibrate Zones','Set projector and floor areas',self.cal)
+  self.side_section('LIVE'); self.start_btn=self.side_btn('Start Experience','Learn baseline and go live',self.project,ACCENT,'#111'); self.debug_btn=self.side_btn('Debug Mode: OFF','Show processing pipeline',self.toggle_debug); self.stop_btn=self.side_btn('Stop Experience','Terminate projection safely',self.stop_projection,RED,'white')
+  self.side_section('SYSTEM'); self.side_btn('Update from GitHub','Check and pull latest build',self.update); self.side_btn('Close Application','Exit and close all windows',self.close_app)
+  self.version=tk.Label(self.sidebar,text=f'VERSION {VERSION}',font=('Segoe UI',8,'bold'),bg=PANEL,fg=MUTED); self.version.pack(side='bottom',anchor='w',padx=25,pady=22)
+  header=tk.Frame(self,bg=BG,height=90); header.grid(row=0,column=1,sticky='ew'); header.grid_propagate(False); tk.Label(header,text='CONTROL DASHBOARD',font=('Segoe UI',20,'bold'),bg=BG,fg=TEXT).pack(side='left',padx=35,pady=25); self.live_badge=tk.Label(header,text='●  IDLE',font=('Segoe UI',10,'bold'),bg=PANEL2,fg=MUTED,padx=14,pady=8); self.live_badge.pack(side='right',padx=35)
+  body=tk.Frame(self,bg=BG); body.grid(row=1,column=1,sticky='nsew',padx=28,pady=(0,25)); body.columnconfigure(0,weight=3); body.columnconfigure(1,weight=2); body.rowconfigure(0,weight=1)
+  preview_card=tk.Frame(body,bg=PANEL); preview_card.grid(row=0,column=0,sticky='nsew',padx=(0,12)); tk.Label(preview_card,text='POOKALAM CANVAS',font=('Segoe UI',10,'bold'),bg=PANEL,fg=MUTED).pack(anchor='w',padx=22,pady=(18,6)); self.view=tk.Label(preview_card,text='Upload a high-quality Pookalam image to begin',font=('Segoe UI',15),bg=PANEL2,fg=MUTED); self.view.pack(expand=True,fill='both',padx=18,pady=(4,18))
+  info=tk.Frame(body,bg=BG); info.grid(row=0,column=1,sticky='nsew'); self.card(info,'SYSTEM STATUS','Ready to configure the experience','status'); self.card(info,'CALIBRATION','Projector field and floor zones not checked','cal'); self.card(info,'DEBUG PIPELINE','Disabled','debug')
+ def side_section(self,text): tk.Label(self.sidebar,text=text,font=('Segoe UI',8,'bold'),bg=PANEL,fg=MUTED).pack(anchor='w',padx=25,pady=(18,7))
+ def side_btn(self,title,sub,cmd,bg=PANEL2,fg=TEXT):
+  f=tk.Frame(self.sidebar,bg=bg,cursor='hand2'); f.pack(fill='x',padx=16,pady=3); tk.Label(f,text=title,font=('Segoe UI',10,'bold'),bg=bg,fg=fg).pack(anchor='w',padx=13,pady=(9,0)); tk.Label(f,text=sub,font=('Segoe UI',8),bg=bg,fg=MUTED if fg==TEXT else '#433',wraplength=210).pack(anchor='w',padx=13,pady=(0,9)); f.bind('<Button-1>',lambda e:cmd()); [w.bind('<Button-1>',lambda e:cmd()) for w in f.winfo_children()]; return f
+ def card(self,parent,title,text,key):
+  f=tk.Frame(parent,bg=PANEL); f.pack(fill='x',pady=(0,12)); tk.Label(f,text=title,font=('Segoe UI',8,'bold'),bg=PANEL,fg=MUTED).pack(anchor='w',padx=18,pady=(14,4)); l=tk.Label(f,text=text,font=('Segoe UI',11,'bold'),bg=PANEL,fg=TEXT,wraplength=300,justify='left'); l.pack(anchor='w',padx=18,pady=(0,14)); setattr(self,key+'_label',l)
+ def set_state(self,text,live=False): self.status_label.configure(text=text); self.live_badge.configure(text=('●  LIVE' if live else '●  IDLE'),fg=(GREEN if live else MUTED))
  def toggle_debug(self):
-  if self.debug.is_set(): self.debug.clear(); self.debug_button.configure(text='Debug: OFF'); debug_close(); self.status.configure(text='Debug mode disabled')
-  else:self.debug.set(); self.debug_button.configure(text='Debug: ON'); self.status.configure(text='Debug mode enabled')
+  if self.debug.is_set(): self.debug.clear(); self.debug_btn.winfo_children()[0].configure(text='Debug Mode: OFF'); self.debug_label.configure(text='Disabled'); debug_close()
+  else:self.debug.set(); self.debug_btn.winfo_children()[0].configure(text='Debug Mode: ON'); self.debug_label.configure(text='Enabled — pipeline windows visible')
  def select(self):
   p=filedialog.askopenfilename(filetypes=[('Images','*.png *.jpg *.jpeg *.bmp *.webp')]);
   if p:Crop(self,p,self.setimg)
  def setimg(self,img):
-  self.image=img; p=img.copy(); p.thumbnail((1000,560)); self.preview=ImageTk.PhotoImage(p); self.view.configure(image=self.preview,text=''); self.status.configure(text=f'Reference image ready: {img.width} x {img.height}')
+  self.image=img; p=img.copy(); p.thumbnail((780,590)); self.preview=ImageTk.PhotoImage(p); self.view.configure(image=self.preview,text='',bg=PANEL); self.set_state(f'Reference ready — {img.width} × {img.height}'); self.cal_label.configure(text='Ready for zone calibration')
  def cal(self):
   cs=cameras()
   if not cs:return messagebox.showerror('Camera','No camera found')
   idx=cs[0] if len(cs)==1 else simpledialog.askinteger('Camera','Camera index: '+', '.join(map(str,cs)),parent=self)
   if idx in cs:
-   try:self.withdraw(); calibration(idx); self.status.configure(text='Both interaction zones saved')
+   try:self.withdraw(); calibration(idx); self.cal_label.configure(text='Zones saved successfully'); self.set_state('Calibration complete')
    except Exception as e:messagebox.showerror('Calibration',str(e))
    finally:self.deiconify()
  def project(self):
-  if self.image is None:return messagebox.showerror('Image','Select a reference image first')
+  if self.image is None:return messagebox.showerror('Image','Upload a reference image first')
   if self.worker and self.worker.is_alive():return
-  self.stop.clear(); img=cv2.cvtColor(np.array(self.image),cv2.COLOR_RGB2BGR); self.status.configure(text='Learning stable projected scene for 10 seconds - keep clear')
+  self.stop.clear(); img=cv2.cvtColor(np.array(self.image),cv2.COLOR_RGB2BGR); self.set_state('Learning stable scene for 10 seconds — keep clear',True)
   def work():
    try:interaction_loop(img,self.stop,self.debug)
    except Exception as e:self.after(0,lambda:messagebox.showerror('Interactive Pookalam',str(e)))
-   finally:self.after(0,lambda:self.status.configure(text='Stopped'))
+   finally:self.after(0,lambda:self.set_state('Experience stopped'))
   self.worker=threading.Thread(target=work,daemon=True); self.worker.start()
- def stop_projection(self):self.stop.set(); self.status.configure(text='Stopping...')
- def close_app(self):self.stop.set(); debug_close(); cv2.destroyAllWindows(); self.destroy()
+ def stop_projection(self): self.stop.set(); self.set_state('Stopping projection...')
+ def close_app(self): self.stop.set(); debug_close(); cv2.destroyAllWindows(); self.destroy()
  def update(self):
-  self.status.configure(text='Updating from GitHub...'); self.update_idletasks()
+  self.set_state('Checking GitHub for updates...')
   def work():
    try:
     ok,msg=run_git_pull(); self.after(0,lambda:messagebox.showinfo('GitHub Update','Update complete. Restart the application.\n\n'+msg) if ok else messagebox.showerror('GitHub Update',msg))
    except Exception as e:self.after(0,lambda:messagebox.showerror('GitHub Update',str(e)))
-   self.after(0,lambda:self.status.configure(text='Ready'))
+   self.after(0,lambda:self.set_state('Ready'))
   threading.Thread(target=work,daemon=True).start()
 def main():App().mainloop()
 if __name__=='__main__':main()
