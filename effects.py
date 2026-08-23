@@ -1,36 +1,40 @@
-"""Lightweight interaction effects for Living Pookalam."""
+"""Artwork-aware effects rendered in normalized floor coordinates."""
 import math, random, time
 import cv2, numpy as np
 
 class EffectsEngine:
-    def __init__(self, width, height):
-        self.w, self.h = width, height
-        self.ripples=[]; self.particles=[]; self.trails=[]
-        self.last_hit={}; self.t0=time.time()
-    def trigger(self, x, y, zone='field'):
-        now=time.time(); key=zone
-        if now-self.last_hit.get(key,0)<0.10:return
-        self.last_hit[key]=now
-        color=(80+random.randrange(120),160+random.randrange(90),220+random.randrange(35))
-        self.ripples.append([float(x),float(y),now,random.randint(18,36),color,zone])
-        for _ in range(14 if zone=='floor' else 8):
-            a=random.random()*math.tau; s=random.uniform(40,170)
-            self.particles.append([float(x),float(y),math.cos(a)*s,math.sin(a)*s,now,color,zone])
-        self.trails.append([float(x),float(y),now,color,zone])
-    def render(self, frame):
-        now=time.time(); out=frame.copy(); overlay=np.zeros_like(out)
-        # Ambient breathing halo around the centre.
-        pulse=(math.sin((now-self.t0)*1.4)+1)*0.5
-        radius=int(min(self.w,self.h)*(0.055+0.02*pulse))
-        cv2.circle(overlay,(self.w//2,self.h//2),radius,(35,55,90),2)
-        self.ripples=[r for r in self.ripples if now-r[2]<1.8]
-        for x,y,t,base,c,z in self.ripples:
-            age=now-t; rad=int(base+age*(300 if z=='field' else 220)); thick=max(1,int(5-age*2)); cv2.circle(overlay,(int(x),int(y)),rad,c,thick)
-        self.particles=[p for p in self.particles if now-p[4]<1.5]
-        for x,y,vx,vy,t,c,z in self.particles:
-            age=now-t; px=int(x+vx*age); py=int(y+vy*age+90*age*age); size=max(1,int(5-age*3)); cv2.circle(overlay,(px,py),size,c,-1)
-        self.trails=[p for p in self.trails if now-p[2]<1.1]
-        for i,p in enumerate(self.trails):
-            x,y,t,c,z=p; alpha=max(0.0,1-(now-t)/1.1); cv2.circle(overlay,(int(x),int(y)),max(3,int(14*alpha)),c,-1)
-            if i: cv2.line(overlay,(int(self.trails[i-1][0]),int(self.trails[i-1][1])),(int(x),int(y)),c,2)
-        return cv2.addWeighted(out,1.0,overlay,0.65,0)
+ def __init__(self,w,h,artwork=None,floor_to_projector=None):
+  self.w,self.h=w,h; self.H=floor_to_projector; self.ripples=[]; self.spark=[]; self.fireflies=[]; self.last=0; self.t0=time.time(); self.palette=[(120,200,255),(255,180,80),(180,255,160)]
+  if artwork is not None:
+   a=cv2.resize(artwork,(256,256)); z=a.reshape(-1,3).astype(np.float32); _,lab,cent=cv2.kmeans(z,6,None,(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER,20,1),3,cv2.KMEANS_PP_CENTERS); self.palette=[tuple(map(int,c)) for c in cent]
+   g=cv2.cvtColor(a,cv2.COLOR_BGR2GRAY); _,self.bright=cv2.threshold(g,190,255,cv2.THRESH_BINARY); self.bright=cv2.resize(self.bright,(640,640))
+  else:self.bright=np.zeros((640,640),np.uint8)
+  for _ in range(28): self.fireflies.append([random.randrange(640),random.randrange(640),random.random()*6.28,random.random()*2+0.4,random.choice(self.palette)])
+ def trigger(self,x,y,zone='floor'):
+  now=time.time()
+  if now-self.last<.12:return
+  self.last=now
+  # input x/y are normalized floor pixels; floor-only effects stay on the warped design.
+  x=np.clip(x,0,639); y=np.clip(y,0,639); c=random.choice(self.palette)
+  self.ripples.append([x,y,now,c,zone])
+  for _ in range(16):
+   a=random.random()*math.tau; s=random.uniform(25,110); self.spark.append([x,y,math.cos(a)*s,math.sin(a)*s,now,c])
+ def _floor_overlay(self):
+  now=time.time(); o=np.zeros((640,640,3),np.uint8)
+  self.ripples=[r for r in self.ripples if now-r[2]<1.8]
+  for x,y,t,c,z in self.ripples:
+   age=now-t; rad=int(12+age*170); glow=np.zeros_like(o); cv2.circle(glow,(int(x),int(y)),rad,c,max(1,int(10-age*5))); glow=cv2.GaussianBlur(glow,(0,0),8); o=cv2.addWeighted(o,1,glow,.65,0)
+  self.spark=[p for p in self.spark if now-p[4]<1.5]
+  for x,y,vx,vy,t,c in self.spark:
+   age=now-t; px=int(x+vx*age); py=int(y+vy*age+28*age*age); s=max(1,int(4-age*2)); cv2.circle(o,(px,py),s,c,-1)
+  # Artwork-guided shimmer and wandering fireflies.
+  phase=(np.sin((now-self.t0)*2.0)+1)*0.5
+  for i,f in enumerate(self.fireflies):
+   x,y,a,spd,c=f; x=(x+math.cos(a+now*.7)*spd)%640; y=(y+math.sin(a+now*.9)*spd)%640; self.fireflies[i][0:2]=[x,y]
+   if self.bright[int(y),int(x)] or random.random()<.04: cv2.circle(o,(int(x),int(y)),max(1,int(2+phase*2)),c,-1)
+  return o
+ def render_floor(self,base):
+  o=self._floor_overlay(); return cv2.addWeighted(base,1,o,.75,0)
+ def render(self,frame):
+  # Compatibility fallback for full-frame effects.
+  return frame
