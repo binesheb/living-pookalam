@@ -1,42 +1,39 @@
 # Living Pookalam
 
-Living Pookalam projects artwork onto a calibrated floor area and provides the foundation for interactive camera-driven effects.
+Living Pookalam projects a reference Pookalam image onto a calibrated floor and uses a live camera to understand activity inside the projection.
 
-## Version 2 foundation
+## Version 2.1
 
-- Image upload and manual crop
-- Projector always uses the Windows extended display
-- Two-stage calibration:
-  1. mark the full projector field in the camera image
-  2. mark the designated physical floor area inside it
-- Perspective correction from the camera-observed quadrilateral to normalized floor coordinates
-- Warped projector output
-- Motion detection across the complete projector field
-- Detailed rectified analysis inside the designated floor area
-- Contour position and normalized interaction coordinates
-- Vision Debug windows for validating camera understanding
-- Manual `Update from GitHub` button
-- Startup performs one `git pull --ff-only`; the application itself never pulls or restarts recursively
+- Upload a high-quality reference image
+- Manual crop before projection
+- The reference image is retained as the source for future pattern and effect generation
+- Projector output is restricted to the Windows extended display
+- Two-stage calibration: projector field, then designated floor area
+- Perspective correction and warped floor projection
+- Motion detection across the full projected area
+- Rectified detailed analysis inside the designated floor area
+- Normalized object coordinates for the interactive effect engine
+- Live camera debug windows automatically appear while projection is active
+- Manual Update from GitHub
+- Startup performs one controlled `git pull --ff-only`
+
+## Controls
+
+- **Select & Crop** — load the reference Pookalam image.
+- **Calibrate** — mark projector field and physical floor area.
+- **Start Projection** — projects to the extended display and opens live camera debug windows on the main display.
+- **Stop Projection** — stops projector output and camera analysis.
+- **Close App** — terminates the application and closes OpenCV windows.
+- **Update from GitHub** — manually pulls the latest changes.
 
 ## Start
-
-On Windows:
 
 ```bat
 run_windows.bat
 ```
 
-Requirements: Python 3, Git, a camera, and a projector configured in **Windows Extend** mode.
+Requirements: Python 3, Git, camera, and projector configured in Windows **Extend** mode.
 
-## Workflow
+## Data model
 
-1. Select and crop an image.
-2. Calibrate the projector field and floor boundary.
-3. Use **Vision Debug** to verify global motion and rectified floor analysis.
-4. Use **Project** to send the warped image only to the extended projector display.
-
-Press `Esc` or `Q` to close OpenCV projection or debug windows.
-
-## Interaction data
-
-The floor is normalized to coordinates from `(0,0)` to `(1,1)`. Future interactive effects should consume this normalized coordinate space rather than raw camera pixels.
+The designated floor is normalized to `(0,0)` through `(1,1)`. Interactive effects should use this coordinate system rather than raw camera pixels.
