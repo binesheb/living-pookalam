@@ -1,30 +1,47 @@
-# Living Pookalam
+# Interactive Pookalam
 
-Living Pookalam projects a reference Pookalam image onto a calibrated floor and uses a live camera to understand activity inside the projection.
+Interactive Pookalam uses a calibrated projector and camera to create two independent interaction spaces from one live camera view.
 
-## Version 2.1
+## Two-zone interaction model
 
-- Upload a high-quality reference image
-- Manual crop before projection
-- The reference image is retained as the source for future pattern and effect generation
-- Projector output is restricted to the Windows extended display
-- Two-stage calibration: projector field, then designated floor area
-- Perspective correction and warped floor projection
-- Motion detection across the full projected area
-- Rectified detailed analysis inside the designated floor area
-- Normalized object coordinates for the interactive effect engine
-- Live camera debug windows automatically appear while projection is active
-- Manual Update from GitHub
-- Startup performs one controlled `git pull --ff-only`
+### 1. Projector Field Zone
+The complete quadrilateral illuminated by the projector.
+
+- Motion is detected anywhere inside this zone.
+- Camera coordinates are mapped into projector pixel coordinates.
+- Field activity can create large-scale effects across the whole projection: ripples, wake-up pulses, trails, or ambient reactions.
+
+### 2. Floor Interaction Zone
+The designated physical floor area inside the projector field.
+
+- The quadrilateral is perspective-rectified into a normalized square.
+- Detailed contour and occupancy analysis happens only here.
+- Positions are reported as normalized `(u,v)` coordinates from `(0,0)` to `(1,1)`.
+- These data drive precise Pookalam interactions and future pattern-aware effects.
+
+The two zones are intentionally separate. A movement in the outer projector field can trigger a global animation without being interpreted as detailed floor interaction.
+
+## Current interactive build
+
+- Upload and crop a high-quality Pookalam reference image.
+- Calibrate projector field and floor interaction area separately.
+- Keep the Pookalam image as the base projection.
+- Detect global motion across the projector field.
+- Convert global motion into projector-space pulse effects.
+- Rectify the floor area for detailed interaction analysis.
+- Show live camera and floor debug windows while interaction is running.
+- Project only on the Windows extended display.
+- Stop and terminate controls in the GUI.
+- Manual GitHub update plus one controlled startup update check.
 
 ## Controls
 
-- **Select & Crop** — load the reference Pookalam image.
-- **Calibrate** — mark projector field and physical floor area.
-- **Start Projection** — projects to the extended display and opens live camera debug windows on the main display.
-- **Stop Projection** — stops projector output and camera analysis.
-- **Close App** — terminates the application and closes OpenCV windows.
-- **Update from GitHub** — manually pulls the latest changes.
+- **Select & Crop**
+- **Calibrate Zones**
+- **Start Interactive**
+- **Stop**
+- **Close App**
+- **Update from GitHub**
 
 ## Start
 
@@ -32,8 +49,4 @@ Living Pookalam projects a reference Pookalam image onto a calibrated floor and 
 run_windows.bat
 ```
 
-Requirements: Python 3, Git, camera, and projector configured in Windows **Extend** mode.
-
-## Data model
-
-The designated floor is normalized to `(0,0)` through `(1,1)`. Interactive effects should use this coordinate system rather than raw camera pixels.
+Press **Stop** to end projection and camera processing. The application also closes all camera/projection windows when **Close App** is used.
