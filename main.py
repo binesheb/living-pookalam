@@ -27,12 +27,24 @@ def cameras(limit=10):
 
 def projector_geometry():
     import ctypes
-    u=ctypes.windll.user32; pw=u.GetSystemMetrics(0); vw=u.GetSystemMetrics(78); vh=u.GetSystemMetrics(79)
-    if vw<=pw: raise RuntimeError('Connect projector in Extend display mode')
-    return pw,0,vw-pw,vh
+    u=ctypes.windll.user32
+    primary_w=u.GetSystemMetrics(0); virtual_x=u.GetSystemMetrics(76); virtual_y=u.GetSystemMetrics(77)
+    virtual_w=u.GetSystemMetrics(78); virtual_h=u.GetSystemMetrics(79)
+    if virtual_w<=primary_w: raise RuntimeError('Projector must be connected as an extended display')
+    return primary_w,0,virtual_w-primary_w,virtual_h
+
+def projector_window(name,image):
+    x,y,w,h=projector_geometry()
+    canvas=cv2.resize(image,(w,h),interpolation=cv2.INTER_LINEAR)
+    cv2.namedWindow(name,cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(name,w,h)
+    cv2.moveWindow(name,x,y)
+    cv2.imshow(name,canvas)
+    cv2.setWindowProperty(name,cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
+    return name
 
 def calibrate(camera_index):
-    x,y,w,h=projector_geometry(); pname='Living Pookalam - Projector'; cv2.namedWindow(pname,cv2.WINDOW_NORMAL); cv2.moveWindow(pname,x,y); cv2.setWindowProperty(pname,cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN); cv2.imshow(pname,np.full((h,w,3),255,np.uint8))
+    x,y,w,h=projector_geometry(); pname=projector_window('Living Pookalam - Projector',np.full((h,w,3),255,np.uint8))
     cap=cv2.VideoCapture(camera_index); points=[[],[]]; stage=0; drag=[None]; win='Living Pookalam - Calibration'; cv2.namedWindow(win)
     def mouse(e,a,b,f,p):
         active=points[stage]
@@ -64,22 +76,16 @@ def calibrate(camera_index):
 def project_image(image):
     if not CONFIG.exists(): raise RuntimeError('Calibrate first')
     cfg=json.loads(CONFIG.read_text()); x,y,pw,ph=projector_geometry()
-    # The four floor points are an observed camera trapezoid representing an ideal physical square.
-    # Map camera-space floor quad into normalized square coordinates, then place that square inside the projector field.
-    floor=np.float32(cfg['floor_boundary_camera']); field=np.float32(cfg['projector_field_camera'])
-    ideal=np.float32([[0,0],[1,0],[1,1],[0,1]])
-    camera_to_floor=cv2.getPerspectiveTransform(floor,ideal)
-    # Projector field is treated as the full projector rectangle; calibration establishes the camera-to-projector relation.
-    proj_rect=np.float32([[0,0],[pw,0],[pw,ph],[0,ph]])
-    camera_to_projector=cv2.getPerspectiveTransform(field,proj_rect)
-    # Compose ideal-floor -> camera -> projector.
-    floor_to_camera=np.linalg.inv(camera_to_floor); floor_to_projector=camera_to_projector @ floor_to_camera
+    floor=np.float32(cfg['floor_boundary_camera']); field=np.float32(cfg['projector_field_camera']); ideal=np.float32([[0,0],[1,0],[1,1],[0,1]])
+    camera_to_floor=cv2.getPerspectiveTransform(floor,ideal); proj_rect=np.float32([[0,0],[pw,0],[pw,ph],[0,ph]])
+    camera_to_projector=cv2.getPerspectiveTransform(field,proj_rect); floor_to_projector=camera_to_projector @ np.linalg.inv(camera_to_floor)
     src=np.float32([[0,0],[image.shape[1]-1,0],[image.shape[1]-1,image.shape[0]-1],[0,image.shape[0]-1]])
-    H=cv2.getPerspectiveTransform(src,np.float32([[0,0],[1,0],[1,1],[0,1]]))
-    final=floor_to_projector @ H
+    final=floor_to_projector @ cv2.getPerspectiveTransform(src,ideal)
     warped=cv2.warpPerspective(image,final,(pw,ph),flags=cv2.INTER_LINEAR,borderValue=(0,0,0))
-    name='Living Pookalam - Projection'; cv2.namedWindow(name,cv2.WINDOW_NORMAL); cv2.moveWindow(name,x,y); cv2.setWindowProperty(name,cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN); cv2.imshow(name,warped)
-    cv2.waitKey(0); cv2.destroyWindow(name)
+    name=projector_window('Living Pookalam - Projection',warped)
+    while True:
+        if cv2.waitKey(30)&0xFF in (27,ord('q'),ord('Q')): break
+    cv2.destroyWindow(name)
 
 class CropDialog(tk.Toplevel):
     def __init__(self,parent,path,done):
@@ -90,7 +96,7 @@ class CropDialog(tk.Toplevel):
     def move(self,e):
         if self.start: self.canvas.coords(self.rect,self.start[0],self.start[1],e.x,e.y)
     def release(self,e):
-        if self.start: self.box=(self.start[0],self.start[1],e.x,e.y)
+        if self.start: self.box=(self.start[0],self.start[1],self.canvas.canvasx(e.x),self.canvas.canvasy(e.y))
     def accept(self):
         if not self.box: self.done(self.original.copy()); self.destroy(); return
         x1,y1,x2,y2=self.box; x1,x2=sorted((x1,x2)); y1,y2=sorted((y1,y2)); box=[int(v/self.scale) for v in (x1,y1,x2,y2)]
