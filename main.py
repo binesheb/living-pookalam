@@ -5,16 +5,27 @@ from tkinter import filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk
 import cv2, numpy as np
 
-VERSION='2.2.0'; ROOT=Path(__file__).resolve().parent; CONFIG=ROOT/'calibration.json'
+VERSION='2.2.1'; ROOT=Path(__file__).resolve().parent; CONFIG=ROOT/'calibration.json'
 
 def run_git_pull():
  r=subprocess.run(['git','pull','--ff-only'],cwd=ROOT,capture_output=True,text=True,timeout=60); return r.returncode==0,(r.stdout+r.stderr).strip()
 def projector_geometry():
- import ctypes; u=ctypes.windll.user32; pw=u.GetSystemMetrics(0); vw=u.GetSystemMetrics(78); vh=u.GetSystemMetrics(79)
+ import ctypes
+ u=ctypes.windll.user32
+ pw=u.GetSystemMetrics(0); vw=u.GetSystemMetrics(78); vh=u.GetSystemMetrics(79)
  if vw<=pw: raise RuntimeError('Projector must be connected in Windows Extend mode')
  return pw,0,vw-pw,vh
 def projector_window(name,image):
- x,y,w,h=projector_geometry(); cv2.namedWindow(name,cv2.WINDOW_NORMAL); cv2.resizeWindow(name,w,h); cv2.moveWindow(name,x,y); cv2.imshow(name,cv2.resize(image,(w,h))); cv2.setWindowProperty(name,cv2.WND_PROP_FULLSCREEN,cv2.WND_PROP_FULLSCREEN); return name
+ x,y,w,h=projector_geometry()
+ cv2.namedWindow(name,cv2.WINDOW_NORMAL)
+ cv2.moveWindow(name,x,y)
+ cv2.resizeWindow(name,w,h)
+ cv2.imshow(name,cv2.resize(image,(w,h),interpolation=cv2.INTER_LINEAR))
+ cv2.waitKey(50)
+ cv2.moveWindow(name,x,y)
+ cv2.setWindowProperty(name,cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
+ cv2.waitKey(50)
+ return name
 def cameras():
  out=[]
  for i in range(10):
@@ -59,18 +70,15 @@ def interaction_loop(img,stop_event):
    if cv2.contourArea(q)<250: continue
    m=cv2.moments(q)
    if not m['m00']: continue
-   cx,cy=m['m10']/m['m00'],m['m01']/m['m00']; p=cv2.perspectiveTransform(np.float32([[[cx,cy]]]),Hfield)[0,0]; global_hits.append(p); pulses.append([float(p[0]),float(p[1]),0,time.time()])
-  now=time.time(); pulses=[z for z in pulses if now-z[3]<1.4]
-  for x,y,r,t in pulses:
+   cx,cy=m['m10']/m['m00'],m['m01']/m['m00']; p=cv2.perspectiveTransform(np.float32([[[cx,cy]]]),Hfield)[0,0]; global_hits.append(p); pulses.append([float(p[0]),float(p[1]),time.time()])
+  now=time.time(); pulses=[z for z in pulses if now-z[2]<1.4]
+  for x,y,t in pulses:
    age=now-t; radius=int(40+age*220); cv2.circle(effect,(int(x),int(y)),radius,(255,255,255),max(1,5-int(age*3)))
   rectified=cv2.warpPerspective(frame,Hfloor,(640,640)); rgray=cv2.GaussianBlur(cv2.cvtColor(rectified,cv2.COLOR_BGR2GRAY),(7,7),0); rmask=cv2.threshold(rgray,0,255,cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]; contours,_=cv2.findContours(rmask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE); interactions=[]
   for q in contours:
    a=cv2.contourArea(q)
    if a<500: continue
    x,y,w,h=cv2.boundingRect(q); u,v=(x+w/2)/640,(y+h/2)/640; interactions.append((u,v,a/(640*640))); cv2.rectangle(rectified,(x,y),(x+w,y+h),(0,255,0),2); cv2.putText(rectified,f'{u:.2f},{v:.2f}',(x,y-5),0,.45,(0,255,0),1)
-  if interactions:
-   for u,v,a in interactions:
-    cv2.putText(effect,f'FLOOR {u:.2f},{v:.2f}',(int(u*pw),int(v*ph)),0,.5,(0,255,0),1)
   cv2.imshow(pname,effect); cv2.polylines(frame,[field.astype(np.int32)],True,(0,255,255),2); cv2.polylines(frame,[floor.astype(np.int32)],True,(0,255,0),2); cv2.putText(frame,f'FIELD MOTION {len(global_hits)} | FLOOR INTERACTIONS {len(interactions)}',(15,30),0,.65,(0,0,255),2); cv2.imshow('Interactive Pookalam - Camera Field',frame); cv2.imshow('Interactive Pookalam - Floor Detail',rectified); cv2.waitKey(1)
  cap.release(); cv2.destroyAllWindows()
 class Crop(tk.Toplevel):
