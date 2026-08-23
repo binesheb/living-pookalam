@@ -1,6 +1,13 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+echo Checking for updates...
+git pull --ff-only
+if errorlevel 1 (
+  echo Update failed. Check your Git connection and try again.
+  pause
+  exit /b 1
+)
 if not exist .venv (
   py -3 -m venv .venv || python -m venv .venv
 )
