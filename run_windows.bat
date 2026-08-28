@@ -24,17 +24,10 @@ echo Normal update failed. Keeping current version.
 goto deps
 
 :repair
-echo Repairing unfinished Git state from GitHub main...
-git merge --abort >nul 2>&1
-git rebase --abort >nul 2>&1
-git cherry-pick --abort >nul 2>&1
-git fetch origin
-if errorlevel 1 goto deps
-git reset --hard origin/main
-if errorlevel 1 goto deps
-git clean -fd
-
-git status --short
+echo Unfinished Git operation detected.
+echo Automatic recovery was skipped to avoid overwriting local work.
+echo Resolve or abort the Git operation manually, then run the application again.
+goto deps
 
 :deps
 if not exist .venv python -m venv .venv
