@@ -20,7 +20,10 @@ app.App.toggle_debug=toggle_debug_reliable
 def interaction_with_effects(img,stop_event,debug_event,progress=None):
  if not app.CONFIG.exists():raise RuntimeError('Calibrate first')
  cfg=app.json.loads(app.CONFIG.read_text());_,_,pw,ph=app.projector_geometry();stable=app.build_projection(img,cfg);pname=app.projector_window('Living Pookalam - Projection',stable)
- cap=cv2.VideoCapture(cfg['camera_index']);field=np.float32(cfg['projector_field_camera']);floor=np.float32(cfg['floor_boundary_camera']);Hfield=cv2.getPerspectiveTransform(field,np.float32([[0,0],[pw,0],[pw,ph],[0,ph]]));Hfloor=cv2.getPerspectiveTransform(floor,np.float32([[0,0],[640,0],[640,640],[0,640]]));Hfloorproj=Hfield@np.linalg.inv(Hfloor)
+ cap=cv2.VideoCapture(cfg['camera_index'])
+ if not cap.isOpened():
+  cap.release();raise RuntimeError(f"Unable to open camera {cfg['camera_index']}")
+ field=np.float32(cfg['projector_field_camera']);floor=np.float32(cfg['floor_boundary_camera']);Hfield=cv2.getPerspectiveTransform(field,np.float32([[0,0],[pw,0],[pw,ph],[0,ph]]));Hfloor=cv2.getPerspectiveTransform(floor,np.float32([[0,0],[640,0],[640,640],[0,640]]));Hfloorproj=Hfield@np.linalg.inv(Hfloor)
  if progress:progress('Learning stable scene — 10 seconds remaining')
  scene_base,floor_base=app.learn_baseline(cap,field,Hfloor,stop_event,debug=debug_event.is_set())
  if scene_base is None:cap.release();return
@@ -34,7 +37,7 @@ def interaction_with_effects(img,stop_event,debug_event,progress=None):
  fx=EffectsEngine(pw,ph,artwork,Hfloorproj);fx.design_mask=vision['mask'];fx.cx,fx.cy=vision['center'];fx.radius=vision['radius'];kernel=np.ones((5,5),np.uint8);tick=time.perf_counter();frames=0;fps=0
  while not stop_event.is_set():
   ok,frame=cap.read()
-  if not ok:continue
+  if not ok:break
   debug=debug_event.is_set();frames+=1;now=time.perf_counter()
   if now-tick>=1:fps=frames/(now-tick);frames=0;tick=now
   rectified=cv2.warpPerspective(frame,Hfloor,(640,640));rdiff,rmask=app.difference(rectified,floor_base);rmask=cv2.morphologyEx(rmask,cv2.MORPH_OPEN,kernel);contours,_=cv2.findContours(rmask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE);floor_debug=rectified.copy();hits=0
