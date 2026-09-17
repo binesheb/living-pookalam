@@ -57,7 +57,7 @@ def project_optional(self):
  def report(text):self.after(0,lambda:self.set_state(text,True))
  def work():
   try:app.interaction_loop(img,self.stop,self.debug,report)
-  except Exception as e:self.after(0,lambda:self.messagebox.showerror('Interactive Pookalam',str(e)))
+  except Exception as e:self.after(0,lambda:self.set_state('Experience stopped'));self.after(0,lambda:app.messagebox.showerror('Interactive Pookalam',str(e)))
   finally:self.after(0,lambda:self.set_state('Experience stopped'))
  self.worker=threading.Thread(target=work,daemon=True);self.worker.start()
 app.App.project=project_optional
