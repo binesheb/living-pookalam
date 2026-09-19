@@ -14,6 +14,10 @@ if exist .git\rebase-merge goto repair
 if exist .git\rebase-apply goto repair
 if exist .git\CHERRY_PICK_HEAD goto repair
 
+echo Checking for local changes before update...
+git status --porcelain --untracked-files=all | findstr . >nul
+if not errorlevel 1 goto local_changes
+
 echo Checking for updates...
 git fetch origin
 if errorlevel 1 goto deps
@@ -21,6 +25,11 @@ git pull --ff-only
 if not errorlevel 1 goto deps
 
 echo Normal update failed. Keeping current version.
+goto deps
+
+:local_changes
+echo Local changes detected. Automatic update was skipped to preserve local work.
+echo Review the working tree and use the documented manual update process when ready.
 goto deps
 
 :repair
