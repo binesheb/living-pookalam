@@ -40,8 +40,25 @@ goto deps
 
 :deps
 if not exist .venv python -m venv .venv
+if errorlevel 1 goto deps_failed
 call .venv\Scripts\activate.bat
+if errorlevel 1 goto deps_failed
 python -m pip install --upgrade pip
+if errorlevel 1 goto deps_failed
 python -m pip install -r requirements.txt
+if errorlevel 1 goto deps_failed
 python launcher.py
+if errorlevel 1 goto app_failed
 pause
+exit /b 0
+
+:deps_failed
+echo Dependency setup failed. The application was not started.
+echo Review the error above, fix the environment, and run the launcher again.
+pause
+exit /b 1
+
+:app_failed
+echo The application exited with an error.
+pause
+exit /b 1
