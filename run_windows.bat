@@ -6,7 +6,7 @@ echo Checking repository state...
 git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 goto deps
 
-echo Checking for unfinished Git operations...
+echo Checking unfinished Git operations...
 git diff --name-only --diff-filter=U | findstr . >nul
 if not errorlevel 1 goto repair
 if exist .git\MERGE_HEAD goto repair
@@ -18,6 +18,15 @@ echo Checking for local changes before update...
 git status --porcelain --untracked-files=all | findstr . >nul
 if not errorlevel 1 goto local_changes
 
+echo Checking trusted update source...
+for /f "delims=" %%R in ('git remote get-url origin 2^>nul') do set "ORIGIN_URL=%%R"
+if "%ORIGIN_URL%"=="https://github.com/binesheb/living-pookalam.git" goto trusted_origin
+if "%ORIGIN_URL%"=="git@github.com:binesheb/living-pookalam.git" goto trusted_origin
+if "%ORIGIN_URL%"=="ssh://git@github.com/binesheb/living-pookalam.git" goto trusted_origin
+echo Untrusted Git origin detected. Automatic update was skipped to protect the installation.
+goto deps
+
+:trusted_origin
 echo Checking for updates...
 git fetch origin
 if errorlevel 1 goto deps
