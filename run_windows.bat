@@ -2,6 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
+echo Checking Python runtime...
+python runtime_check.py
+if errorlevel 1 goto python_version_failed
+
 echo Checking repository state...
 git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 goto deps
@@ -60,6 +64,11 @@ python launcher.py
 if errorlevel 1 goto app_failed
 pause
 exit /b 0
+
+:python_version_failed
+echo Python 3.11 or newer is required. Install Python 3.11+ and ensure the python command is on PATH.
+pause
+exit /b 1
 
 :deps_failed
 echo Dependency setup failed. The application was not started.

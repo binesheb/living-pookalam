@@ -1,5 +1,9 @@
 # Interactive Pookalam
 
+## Requirements
+
+- Python 3.11 or newer.
+
 Interactive Pookalam uses a calibrated projector and camera to create two independent interaction spaces from one live camera view.
 
 ## Two-zone interaction model
